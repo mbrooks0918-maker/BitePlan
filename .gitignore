@@ -22,6 +22,9 @@ dist-ssr
 .DS_Store
 Thumbs.db
 
+# Agent / IDE local state
+.claude/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
