@@ -137,6 +137,7 @@ bite-plan/
 
 ### Seagrass (FWC)
 - Hub: https://geodata.myfwc.com/datasets/myfwc::seagrass-habitat-in-florida
+- Authoritative endpoint: `https://gis.myfwc.com/hosting/rest/services/Open_Data/Seagrass_Statewide/MapServer/15` (verified in Step 3)
 - Query FeatureService with `f=geojson` and `geometry` envelope matching coverage bbox
 - Save filtered output to `public/data/seagrass.geojson`
 
@@ -152,9 +153,11 @@ bite-plan/
 - Supports `generateKml` endpoint
 
 ### Wetlands (USFWS NWI)
-- REST: `https://www.fws.gov/wetlandsmapservice/services/Wetlands/MapServer/0`
-- Query with `f=geojson`, filter to estuarine/marine wetland types only:
-  `WETLAND_TYPE = 'Estuarine and Marine Wetland' OR 'Estuarine and Marine Deepwater'`
+- REST (working): `https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer/0`
+- Deprecated: `https://www.fws.gov/wetlandsmapservice/services/Wetlands/MapServer/0` — returns 403 as of Step 3
+- Query with `f=geojson`, filter to estuarine/marine wetland types only. Use the `IN` form — the OR-equals form 500s on the server because the layer joins to a code table:
+  `Wetlands.WETLAND_TYPE IN ('Estuarine and Marine Wetland', 'Estuarine and Marine Deepwater')`
+- Joined WHERE is server-expensive over large bboxes; tile the coverage area into smaller pieces (Step 3 uses a 4×2 grid)
 - Save to `public/data/wetlands.geojson`
 
 **Failure handling:** If any FWC/USFWS endpoint fails or doesn't respond in the fetch-data script, log clearly and continue. Stub with empty FeatureCollection so the app doesn't crash.
@@ -533,3 +536,6 @@ Source: Alabama Marine Resources Division side-scan sonar imagery (`https://cons
 - Community-shared waypoints
 - Sync across devices
 - "Logbook" tab — past trips with weather/tide/conditions playback
+- Backfill Mobile Bay wetlands — tiles 1 and 5 of the Step 3 fetch failed with HTTP 500 (USFWS server overload). Affects Alabama portion of coverage (Dauphin Island, north Mobile Bay estuary). Resolution: targeted backfill script with smaller sub-tiles over the AL column, dedup by OBJECTID. Not blocking the Perdido Key trip use case.
+- Labeled basemap toggle — overlay roads, state/county lines, and place names on the satellite view. Should be a toggle in the layer controls (off by default per current spec, but easily accessible). Useful for orientation when not yet using GPS.
+- Dev-only labeled basemap option for testing — quick toggle during development to see where the map is centered without having to rely on GPS or habitat layers.
