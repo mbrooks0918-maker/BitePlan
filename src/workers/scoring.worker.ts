@@ -41,6 +41,7 @@ import { scoreUnit } from '@/lib/scoring'
 import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
 import type {
   Bounds,
+  DayCondition,
   HeatZone,
   ScoringContext,
   ScoringResult,
@@ -79,7 +80,22 @@ type ScoreMessage = {
   windSpeedKt: number
   maxUnits: number
 }
-type MainToWorker = InitMessage | ScoreMessage
+type ComputeDayConditionsMessage = {
+  type: 'computeDayConditions'
+  reqId: number
+  bounds: Bounds
+  dayCount: number              // 7 for the picker, 12 for Trip Mode
+  startDateMs: number           // midnight (local) of the first day, epoch ms
+  stationLat: number
+  stationLon: number
+  // Multi-day prediction window covering all days needed for cross-day tide
+  // bracketing. Main thread fetches via assembleTideWindow and ships the
+  // merged sorted array.
+  tidePredictions: TidePrediction[]
+  species: Species
+  windSpeedKt: number
+}
+type MainToWorker = InitMessage | ScoreMessage | ComputeDayConditionsMessage
 
 export type ScoredEntry = { unit: ScoringUnit; result: ScoringResult }
 export type InitCompleteMessage = { type: 'init-complete'; reqId: number; featureCount: number }
@@ -91,7 +107,16 @@ export type ScoredResponseMessage = {
   totalInView: number
   ms: number
 }
-export type WorkerToMain = InitCompleteMessage | ScoredResponseMessage
+export type DayConditionsResponseMessage = {
+  type: 'dayConditions'
+  reqId: number
+  results: DayCondition[]
+  ms: number
+}
+export type WorkerToMain =
+  | InitCompleteMessage
+  | ScoredResponseMessage
+  | DayConditionsResponseMessage
 
 // ---- helpers -------------------------------------------------------------
 
@@ -256,6 +281,105 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       zones,
       totalInView: scored.length,
       ms: performance.now() - t0,
+    }
+    ;(self as DedicatedWorkerGlobalScope).postMessage(reply)
+    return
+  }
+
+  if (msg.type === 'computeDayConditions') {
+    if (!isHabitatIndexReady()) {
+      const reply: DayConditionsResponseMessage = {
+        type: 'dayConditions',
+        reqId: msg.reqId,
+        results: [],
+        ms: 0,
+      }
+      ;(self as DedicatedWorkerGlobalScope).postMessage(reply)
+      return
+    }
+
+    const t0 = performance.now()
+
+    // Same in-view unit set the main scoring uses — reuse the derivation cache.
+    const features = getVisibleHabitat(msg.bounds)
+    const allUnits: ScoringUnit[] = []
+    for (const f of features) {
+      const units = deriveScoringUnits(f)
+      allUnits.push(...units)
+    }
+    const inView = filterUnitsToBounds(allUnits, msg.bounds)
+
+    // 3-hour windows starting at 3 AM, covering 03 / 06 / 09 / 12 / 15 / 18 / 21.
+    // Seven windows per day; enough to catch every dawn/dusk/midday band.
+    const WINDOW_HOURS = [3, 6, 9, 12, 15, 18, 21]
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const HOUR_MS = 60 * 60 * 1000
+
+    const results: DayCondition[] = []
+    for (let dayIdx = 0; dayIdx < msg.dayCount; dayIdx++) {
+      const dayStartMs = msg.startDateMs + dayIdx * DAY_MS
+      const dayStart = new Date(dayStartMs)
+      const dayKey = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, '0')}-${String(dayStart.getDate()).padStart(2, '0')}`
+
+      let dayBestScore = -Infinity
+      let dayBestWindowStartMs = dayStartMs + 6 * HOUR_MS // sensible fallback
+      let dayBestFireCount = 0
+
+      for (const startHour of WINDOW_HOURS) {
+        const windowStartMs = dayStartMs + startHour * HOUR_MS
+        const windowTime = new Date(windowStartMs)
+        const { state: tideState } = getCurrentTideState(msg.tidePredictions, windowTime)
+        const { sunrise, sunset } = getSunTimes(windowTime, msg.stationLat, msg.stationLon)
+
+        const ctx: ScoringContext = {
+          time: windowTime,
+          tideState,
+          species: msg.species,
+          moonIllumination: getMoonIllumination(windowTime),
+          sunrise,
+          sunset,
+          windSpeedKt: msg.windSpeedKt,
+          dailyTideRangeFt: dailyTideRange(msg.tidePredictions, windowTime),
+          month: windowTime.getMonth() + 1,
+          hour: windowTime.getHours(),
+        }
+
+        let windowMax = 0
+        let windowFires = 0
+        for (const u of inView) {
+          const r = scoreUnit(u, ctx)
+          if (r.score > windowMax) windowMax = r.score
+          if (r.score >= 8) windowFires++
+        }
+
+        if (windowMax > dayBestScore) {
+          dayBestScore = windowMax
+          dayBestWindowStartMs = windowStartMs
+          dayBestFireCount = windowFires
+        }
+      }
+
+      if (dayBestScore < 0) dayBestScore = 0
+      const conditionsScore = Math.max(1, Math.min(10, Math.round(dayBestScore)))
+      results.push({
+        date: dayKey,
+        conditionsScore,
+        fireZoneCount: dayBestFireCount,
+        bestWindowStartMs: dayBestWindowStartMs,
+        bestWindowScore: dayBestScore,
+      })
+    }
+
+    const ms = performance.now() - t0
+    console.info(
+      `[scoring/worker] day conditions for ${msg.dayCount} days × ${WINDOW_HOURS.length} windows × ${inView.length} units in ${ms.toFixed(0)} ms`,
+    )
+
+    const reply: DayConditionsResponseMessage = {
+      type: 'dayConditions',
+      reqId: msg.reqId,
+      results,
+      ms,
     }
     ;(self as DedicatedWorkerGlobalScope).postMessage(reply)
     return

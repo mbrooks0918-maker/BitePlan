@@ -9,6 +9,7 @@ import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
+import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
 
 const ESRI_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -111,6 +112,7 @@ function MapStateSync() {
 function MapView() {
   const center = useBitePlanStore((s) => s.center)
   const zoom = useBitePlanStore((s) => s.zoom)
+  const timeMode = useBitePlanStore((s) => s.timeMode)
 
   return (
     <>
@@ -140,7 +142,7 @@ function MapView() {
       <TideReadout />
       <DevLayerPanel />
       <ScoringStatus />
-      <TimeSlider />
+      {timeMode === '24h' ? <TimeSlider /> : <DayPickerStrip />}
       <ZonePopup />
     </>
   )

@@ -103,6 +103,30 @@ export type ScoringResult = {
   projectedNextFire: null
 }
 
+/** Time-strip display mode. The 24h slider and the 7-day picker share the
+ *  same screen real estate near the bottom of the map. */
+export type TimeMode = '24h' | '7day'
+
+/**
+ * Per-day summary for the day picker. The day's `conditionsScore` is the
+ * single best unit score reached in the day's best 3-hour window, rounded
+ * to an integer 1-10. `fireZoneCount` is the number of units that hit
+ * fire-tier (≥ 8) in that same best window. Step 12 (Trip Mode) reuses this
+ * shape with `dayCount = 12`.
+ */
+export type DayCondition = {
+  /** YYYY-MM-DD of the day this row represents. */
+  date: string
+  /** 1-10 rounded score; the day's "Conditions Score". */
+  conditionsScore: number
+  /** Count of fire-tier (≥ 8) units in the day's best window. */
+  fireZoneCount: number
+  /** Start of the best 3-hour window, epoch ms. */
+  bestWindowStartMs: number
+  /** Raw (un-rounded) best unit score at the best window. */
+  bestWindowScore: number
+}
+
 /**
  * A clustered group of same-tier scored units rendered as one tinted polygon.
  * Geometry is a convex hull around the cluster's member centroids, buffered

@@ -25,6 +25,7 @@ import {
   type TidePrediction,
 } from '@/lib/tides'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
+import ModeToggle from './ModeToggle'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const SNAP_WINDOW_MIN = 15
@@ -233,24 +234,27 @@ function TimeSlider() {
       className="fixed bottom-3 inset-x-3 sm:inset-x-6 z-[1000] bg-slate-900/85 backdrop-blur-sm rounded-2xl shadow-xl px-4 pt-3 pb-4"
     >
       {/* Header row */}
-      <div className="flex items-baseline justify-between mb-2">
-        <div className="text-slate-100 text-sm">
-          <span className="text-slate-400 mr-2">
-            {format(currentTime, 'EEE MMM d')}
-          </span>
-          <span className="font-semibold tabular-nums text-base">
-            {format(currentTime, 'h:mm a')}
-          </span>
+      <div className="flex items-center justify-between mb-2 gap-3">
+        <ModeToggle />
+        <div className="flex items-baseline gap-3 ml-auto">
+          <div className="text-slate-100 text-sm">
+            <span className="text-slate-400 mr-2">
+              {format(currentTime, 'EEE MMM d')}
+            </span>
+            <span className="font-semibold tabular-nums text-base">
+              {format(currentTime, 'h:mm a')}
+            </span>
+          </div>
+          {!atNow && (
+            <button
+              type="button"
+              onClick={resetToNow}
+              className="text-xs font-medium text-teal-400 hover:text-teal-300 underline underline-offset-2"
+            >
+              Reset to now
+            </button>
+          )}
         </div>
-        {!atNow && (
-          <button
-            type="button"
-            onClick={resetToNow}
-            className="text-xs font-medium text-teal-400 hover:text-teal-300 underline underline-offset-2"
-          >
-            Reset to now
-          </button>
-        )}
       </div>
 
       {/* Track */}

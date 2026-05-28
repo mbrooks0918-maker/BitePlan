@@ -211,7 +211,10 @@ export async function fetchTideCurve(
     writeCache(key, { predictions: fresh, cachedAt: now })
     return fresh
   } catch (e) {
-    console.error('[tides] curve fetch failed and no cache available:', e)
+    // Expected for subordinate stations (Nix Point etc.) — `interval=6` is
+    // primary-only. The slider falls back to synthesizeCurveFromHilo. Warn
+    // rather than error so this doesn't drown the console at the picker rate.
+    console.warn('[tides] curve fetch failed (subordinate station? synth fallback):', e)
     return []
   }
 }

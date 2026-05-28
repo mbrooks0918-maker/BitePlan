@@ -1,14 +1,20 @@
 import { create } from 'zustand'
 import type {
   Bounds,
+  DayCondition,
   HeatZone,
   LatLon,
   ScoringResult,
   ScoringUnit,
   Species,
+  TimeMode,
 } from '@/types'
 import { getNearestStation, type Station } from '@/lib/stations'
-import { assembleTideWindow, type TidePrediction } from '@/lib/tides'
+import {
+  assembleTideWindow,
+  fetchTidePredictions,
+  type TidePrediction,
+} from '@/lib/tides'
 import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
@@ -48,16 +54,30 @@ type BitePlanState = {
   // dismissed. Set by clicking a heat zone polygon or an individual dot.
   selectedZone: ScoredEntry | null
 
+  // Time strip mode + 7-day picker data. dayConditions is the precomputed
+  // per-day summary the picker reads; dayCount is parameterized so Step 12
+  // (Trip Mode) can render 12 cards from the same plumbing.
+  timeMode: TimeMode
+  dayConditions: DayCondition[]
+  dayConditionsLoading: boolean
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
   setCurrentTime: (currentTime: Date) => void
   setSpecies: (species: Species) => void
   selectZone: (payload: ScoredEntry | null) => void
+  setTimeMode: (mode: TimeMode) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
   recomputeScoredUnits: () => void
+  /**
+   * Compute per-day conditions for `dayCount` consecutive days starting at
+   * `startDate`. Step 11 calls with (today, 7); Step 12 will call with
+   * (June 1, 12).
+   */
+  recomputeDayConditions: (startDate: Date, dayCount: number) => Promise<void>
 }
 
 // --- Web Worker setup ------------------------------------------------------
@@ -92,6 +112,8 @@ function scheduleTimeRecompute(fn: () => void): void {
 // Cleared on response so a later genuine recompute (e.g. user pans away and
 // back) still goes through.
 let inFlightSignature: string | null = null
+let latestDayConditionsReqId = 0
+let inFlightDayConditionsSig: string | null = null
 
 function buildRequestSignature(
   bounds: Bounds,
@@ -139,6 +161,14 @@ scoringWorker.onmessage = (e: MessageEvent<WorkerToMain>) => {
       lastScoringMs: msg.ms,
     })
   }
+  if (msg.type === 'dayConditions') {
+    if (msg.reqId !== latestDayConditionsReqId) return
+    inFlightDayConditionsSig = null
+    useBitePlanStore.setState({
+      dayConditions: msg.results,
+      dayConditionsLoading: false,
+    })
+  }
 }
 
 // Dev-only handle for preview debugging. Stripped in production by Vite.
@@ -168,6 +198,10 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   habitatIndexReady: false,
   selectedZone: null,
 
+  timeMode: '24h',
+  dayConditions: [],
+  dayConditionsLoading: false,
+
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
   setBounds: (bounds) => set({ bounds }),
@@ -180,6 +214,14 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   },
   setSpecies: (species) => set({ species }),
   selectZone: (payload) => set({ selectedZone: payload }),
+  setTimeMode: (mode) => {
+    set({ timeMode: mode })
+    // Lazy-trigger day-conditions compute the first time the picker is shown
+    // (or when the bounds it was last computed against no longer match).
+    if (mode === '7day' && get().dayConditions.length === 0 && get().habitatIndexReady) {
+      void get().recomputeDayConditions(new Date(), 7)
+    }
+  },
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),
@@ -245,5 +287,71 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       windSpeedKt: 0, // Step 13 wires this from NWS
       maxUnits: MAX_SCORED_UNITS,
     })
+  },
+
+  recomputeDayConditions: async (startDate, dayCount) => {
+    const { bounds, currentStation, species, habitatIndexReady } = get()
+    if (!habitatIndexReady) return
+    if (!bounds) return
+
+    // Coalesce on signature: bounds + start day + dayCount + species + station.
+    // (Identical signature in flight → skip.)
+    const sig = [
+      bounds.west.toFixed(4),
+      bounds.south.toFixed(4),
+      bounds.east.toFixed(4),
+      bounds.north.toFixed(4),
+      startDate.toDateString(),
+      dayCount,
+      species,
+      currentStation.id,
+    ].join('|')
+    if (sig === inFlightDayConditionsSig) return
+    inFlightDayConditionsSig = sig
+
+    set({ dayConditionsLoading: true })
+
+    // Assemble a wide tide-prediction window: yesterday → startDate+dayCount,
+    // so the worker's getCurrentTideState can bracket across day boundaries
+    // for the whole computed range. Reuses the SWR cache, so adjacent days
+    // fetched by other features (projection, main scoring) cost nothing.
+    const dayMs = 24 * 60 * 60 * 1000
+    const dayDates: Date[] = []
+    for (let d = -1; d <= dayCount; d++) {
+      const day = new Date(startDate)
+      day.setDate(day.getDate() + d)
+      dayDates.push(day)
+    }
+    const fetched = await Promise.all(
+      dayDates.map((d) =>
+        fetchTidePredictions(currentStation.id, d).catch(() => [] as TidePrediction[]),
+      ),
+    )
+    const tidePredictions = fetched.flat()
+
+    // Use local-midnight of startDate as the day origin.
+    const startMidnight = new Date(
+      startDate.getFullYear(),
+      startDate.getMonth(),
+      startDate.getDate(),
+      0, 0, 0, 0,
+    )
+
+    const reqId = nextReqId++
+    latestDayConditionsReqId = reqId
+
+    scoringWorker.postMessage({
+      type: 'computeDayConditions',
+      reqId,
+      bounds,
+      dayCount,
+      startDateMs: startMidnight.getTime(),
+      stationLat: currentStation.lat,
+      stationLon: currentStation.lon,
+      tidePredictions,
+      species,
+      windSpeedKt: 0,
+    })
+    void dayMs
   },
 }))
