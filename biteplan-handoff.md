@@ -311,6 +311,7 @@ Compute lazily on zone tap. Cache result for the session.
 - View pan/zoom: scored zones redraw within 300ms
 - Time scrub: zones redraw within 200ms per step
 - **Strategy:** pre-compute habitat polygon spatial index (rbush) on app init; scoring runs synchronously for visible polygons only; debounce map move events at 200ms; move scoring to a web worker if main-thread performance suffers
+- Worker watchdog: the signature-based recompute coalescing (added in the Step 8/9 bugfix) leaves inFlightSignature locked if the worker dies or never responds, which silently halts all further recomputes until reload. Step 20 should add a ~90s timeout watchdog that clears inFlightSignature and surfaces an error if no 'scored' response arrives.
 
 ## UI: tier-color heat zones as primary visual
 

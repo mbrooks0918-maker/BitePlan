@@ -16,10 +16,14 @@
  */
 
 import { useEffect, useId, useRef, useState } from 'react'
+import { format } from 'date-fns'
 import { Check, Navigation, X as XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { ScoringFactor, Tier } from '@/types'
+import type { ScoringContext, ScoringFactor, Tier } from '@/types'
 import { useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
+import { getMoonIllumination, getSunTimes } from '@/lib/moon'
+import { getCurrentTideState } from '@/lib/tides'
+import { getCachedProjection, type ProjectionResult } from '@/lib/projection'
 
 // Tier → header background + button background. Spec colors from handoff doc.
 const TIER_BG: Record<Tier, string> = {
@@ -68,9 +72,28 @@ function FactorLine({
   )
 }
 
+type ProjectionState =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'none' }
+  | { status: 'result'; data: ProjectionResult }
+
+function formatProjectionLine(p: ProjectionResult): string {
+  const dateStr = format(p.when, "EEE MMM d 'at' h:mm a")
+  const prefix = p.tier === 'fire' ? 'Lights up' : 'Best window'
+  return `${prefix}: ${dateStr} (${p.score}/10) — ${p.reason}`
+}
+
 function ZonePopup() {
   const selectedZone = useBitePlanStore((s) => s.selectedZone)
   const selectZone = useBitePlanStore((s) => s.selectZone)
+  // Hour-bucket the currentTime so projection re-runs at most once per hour
+  // when the popup is open and the user scrubs the time slider across the
+  // hour boundary.
+  const currentTimeBucket = useBitePlanStore((s) =>
+    Math.floor(s.currentTime.getTime() / (60 * 60 * 1000)),
+  )
+  const [projection, setProjection] = useState<ProjectionState>({ status: 'loading' })
   const titleId = useId()
 
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -100,6 +123,58 @@ function ZonePopup() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedZone, selectZone])
+
+  // Kick off forward projection when the popup opens for a new unit, or when
+  // the hour bucket changes (e.g. user scrubbed past midnight).
+  useEffect(() => {
+    if (!selectedZone) return
+    let cancelled = false
+
+    setProjection({ status: 'loading' })
+
+    const state = useBitePlanStore.getState()
+    const { currentTime, currentStation, tidePredictions, species } = state
+    const { state: tideState } = getCurrentTideState(tidePredictions, currentTime)
+    const { sunrise, sunset } = getSunTimes(currentTime, currentStation.lat, currentStation.lon)
+    const dailyTideRangeFt =
+      tidePredictions.length === 0
+        ? 1.0
+        : Math.max(...tidePredictions.map((p) => p.v)) -
+          Math.min(...tidePredictions.map((p) => p.v))
+
+    const ctx: ScoringContext = {
+      time: currentTime,
+      tideState,
+      species,
+      moonIllumination: getMoonIllumination(currentTime),
+      sunrise,
+      sunset,
+      windSpeedKt: 0, // Step 13 wires this
+      dailyTideRangeFt,
+      month: currentTime.getMonth() + 1,
+      hour: currentTime.getHours(),
+    }
+
+    getCachedProjection(selectedZone.unit, ctx, currentStation)
+      .then((result) => {
+        if (cancelled) return
+        if (result === null) {
+          setProjection({ status: 'none' })
+        } else {
+          setProjection({ status: 'result', data: result })
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return
+        console.error('[ZonePopup] projection failed:', e)
+        setProjection({ status: 'error' })
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedZone?.unit.id, currentTimeBucket])
 
   if (!selectedZone) return null
 
@@ -217,14 +292,31 @@ function ZonePopup() {
           )}
         </section>
 
-        {/* Forward projection — Step 9 wires the real value */}
+        {/* Forward projection */}
         <section className="px-4 py-3 border-t border-slate-800">
           <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">
             Lights up
           </div>
-          <div className="text-sm text-slate-500 italic">
-            Forward projection coming soon
-          </div>
+          {projection.status === 'loading' && (
+            <div className="text-sm text-slate-400 italic">
+              Computing forward projection…
+            </div>
+          )}
+          {projection.status === 'error' && (
+            <div className="text-sm text-slate-500 italic">
+              Forward projection unavailable
+            </div>
+          )}
+          {projection.status === 'none' && (
+            <div className="text-sm text-slate-500 italic">
+              No improvement projected in the next 7 days
+            </div>
+          )}
+          {projection.status === 'result' && (
+            <div className="text-sm text-slate-200">
+              {formatProjectionLine(projection.data)}
+            </div>
+          )}
         </section>
 
         {/* CTAs */}
