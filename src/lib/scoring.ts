@@ -103,12 +103,28 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   }
 
   // ----- 3) Time of day ---------------------------------------------------
-  type TimeBand = 'dawn' | 'dusk' | 'morning' | 'midday' | 'night'
+  //
+  // Bands across a full 24 h cycle, in order of check:
+  //
+  //   Dawn       |sunrise ± 1.5h|                                +2  fired
+  //   Dusk       |sunset  ± 1.5h|                                +2  fired
+  //   Morning    sunrise+1.5h  →  10:00                          +1  fired
+  //   Midday     10:00          →  16:00       (summer = -1)     -1/0 missing
+  //   Afternoon  16:00          →  sunset−1.5h                    0  missing
+  //   Night      sunset+1.5h    →  sunrise−1.5h                  -2  missing
+  //
+  // The afternoon band exists so daylight hours between the midday window
+  // end (16:00) and the dusk window start (sunset−1.5h) don't accidentally
+  // fall into the night branch. On a summer day with a 19:50 sunset, that
+  // gap is 16:00–18:20 — three hours of bright daylight that were getting
+  // hit with a −2 night penalty before this fix.
+  type TimeBand = 'dawn' | 'dusk' | 'morning' | 'midday' | 'afternoon' | 'night'
   let band: TimeBand
   if (Math.abs(nowMin - sunriseMin) <= TIME_WINDOW_MIN) band = 'dawn'
   else if (Math.abs(nowMin - sunsetMin) <= TIME_WINDOW_MIN) band = 'dusk'
   else if (nowMin > sunriseMin + TIME_WINDOW_MIN && nowMin < MIDDAY_START_MIN) band = 'morning'
   else if (inMidday) band = 'midday'
+  else if (nowMin >= MIDDAY_END_MIN && nowMin < sunsetMin - TIME_WINDOW_MIN) band = 'afternoon'
   else band = 'night'
 
   switch (band) {
@@ -130,6 +146,9 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
       )
       break
     }
+    case 'afternoon':
+      add(factor(false, 0, 'Afternoon — neutral time of day', 'time'))
+      break
     case 'night':
       add(factor(false, -2, 'Night — low activity', 'time'))
       break

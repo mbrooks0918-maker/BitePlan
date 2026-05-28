@@ -261,7 +261,8 @@ interface ScoringResult {
 - Dusk (sunset ±1.5 hr): +2
 - Mid-morning (sunrise+1.5hr to 10am): +1
 - Midday (10am-4pm): -1 in summer (May-Sep), 0 otherwise
-- Night: -2
+- Afternoon (4pm to sunset−1.5hr): 0 — neutral daylight band so late-afternoon doesn't fall into night
+- Night (sunset+1.5hr to sunrise−1.5hr): -2 — true dark only
 
 **Season (current month):**
 - May-Jun: +1 to all (peak inshore)
