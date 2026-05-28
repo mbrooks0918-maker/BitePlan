@@ -7,22 +7,17 @@ export type Station = TideStation
  *
  * Kept in sync with public/data/tide_stations.json (the runtime copy used
  * by the PWA precache). Update both when adding or correcting stations.
- *
- * Known data caveat: Destin and Panama City both list station ID 8729108
- * in the handoff doc. That looks like a transcription bug — 8729108 is the
- * actual NOAA "Panama City" gauge. Until corrected upstream, Destin queries
- * will return Panama City predictions. Flagged for follow-up.
  */
 export const TIDE_STATIONS: ReadonlyArray<Station> = [
-  { id: '8735180', name: 'Dauphin Island, AL',         lat: 30.250, lon: -88.075 },
-  { id: '8737048', name: 'Mobile State Docks, AL',     lat: 30.708, lon: -88.043 },
-  { id: '8736897', name: 'Bon Secour, AL',             lat: 30.328, lon: -87.730 },
-  { id: '8729962', name: 'Nix Point, Perdido Bay, FL', lat: 30.413, lon: -87.448 },
-  { id: '8729840', name: 'Pensacola, FL',              lat: 30.404, lon: -87.211 },
-  { id: '8729214', name: 'Navarre Beach, FL',          lat: 30.376, lon: -86.866 },
-  { id: '8729108', name: 'Destin, FL',                 lat: 30.393, lon: -86.514 },
-  { id: '8729108', name: 'Panama City, FL',            lat: 30.152, lon: -85.667 },
-  { id: '8728690', name: 'Apalachicola, FL',           lat: 29.727, lon: -84.981 },
+  { id: '8735180', name: 'Dauphin Island, AL',                   lat: 30.250, lon: -88.075 },
+  { id: '8737048', name: 'Mobile State Docks, AL',               lat: 30.708, lon: -88.043 },
+  { id: '8736897', name: 'Bon Secour, AL',                       lat: 30.328, lon: -87.730 },
+  { id: '8729962', name: 'Nix Point, Perdido Bay, FL',           lat: 30.413, lon: -87.448 },
+  { id: '8729840', name: 'Pensacola, FL',                        lat: 30.404, lon: -87.211 },
+  { id: '8729214', name: 'Navarre Beach, FL',                    lat: 30.376, lon: -86.866 },
+  { id: '8729210', name: 'Destin, FL (Panama City Beach gauge)', lat: 30.215, lon: -85.879 },
+  { id: '8729108', name: 'Panama City, FL',                      lat: 30.152, lon: -85.667 },
+  { id: '8728690', name: 'Apalachicola, FL',                     lat: 29.727, lon: -84.981 },
 ]
 
 /**

@@ -174,7 +174,7 @@ Multi-station support. Stations in coverage area:
 | Nix Point, Perdido Bay, FL | 8729962 | 30.413 | -87.448 |
 | Pensacola, FL | 8729840 | 30.404 | -87.211 |
 | Navarre Beach, FL | 8729214 | 30.376 | -86.866 |
-| Destin, FL | 8729108 | 30.393 | -86.514 |
+| Destin, FL (Panama City Beach gauge) | 8729210 | 30.215 | -85.879 |
 | Panama City, FL | 8729108 | 30.152 | -85.667 |
 | Apalachicola, FL | 8728690 | 29.727 | -84.981 |
 
