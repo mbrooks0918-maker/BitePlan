@@ -74,6 +74,34 @@ const scoringWorker = new Worker(
 let nextReqId = 1
 let latestScoreReqId = 0
 
+// Signature of the in-flight score request. Used to skip redundant recomputes
+// fired during initial load — the worker init-complete callback, the mount-
+// time updateTideStation, the map's initial moveend, and invalidateSize's
+// follow-up moveend all fire in the first ~half-second with identical context,
+// and without this they queue four ~10 s passes in the worker (~40 s wait).
+// Cleared on response so a later genuine recompute (e.g. user pans away and
+// back) still goes through.
+let inFlightSignature: string | null = null
+
+function buildRequestSignature(
+  bounds: Bounds,
+  currentTime: Date,
+  species: Species,
+  stationId: string,
+  predictionsLen: number,
+): string {
+  return [
+    bounds.west.toFixed(4),
+    bounds.south.toFixed(4),
+    bounds.east.toFixed(4),
+    bounds.north.toFixed(4),
+    currentTime.getTime(),
+    species,
+    stationId,
+    predictionsLen,
+  ].join('|')
+}
+
 // Kick off worker init immediately. The first 'score' message can be sent
 // concurrently — the worker will respond empty until init resolves, then the
 // next recompute (debounced 200ms after the next moveend or fired manually
@@ -93,6 +121,7 @@ scoringWorker.onmessage = (e: MessageEvent<WorkerToMain>) => {
     // Drop responses to old requests. Without this, a slow cold-pass response
     // could clobber the result of a fresher pan that completed first.
     if (msg.reqId !== latestScoreReqId) return
+    inFlightSignature = null
     useBitePlanStore.setState({
       scoredUnits: msg.entries,
       zones: msg.zones,
@@ -172,6 +201,19 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       get()
     if (!habitatIndexReady) return
     if (!bounds) return
+
+    // Skip if a request with this exact context is already in flight. This
+    // collapses the 3-4 cold-pass triggers (init-complete, tide-fetch-success,
+    // initial moveend, invalidateSize moveend) into ONE worker pass.
+    const sig = buildRequestSignature(
+      bounds,
+      currentTime,
+      species,
+      currentStation.id,
+      tidePredictions.length,
+    )
+    if (sig === inFlightSignature) return
+    inFlightSignature = sig
 
     const reqId = nextReqId++
     latestScoreReqId = reqId
