@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
   Bounds,
+  HeatZone,
   LatLon,
   ScoringResult,
   ScoringUnit,
@@ -38,6 +39,7 @@ type BitePlanState = {
   // Scoring
   species: Species
   scoredUnits: ScoredEntry[]
+  zones: HeatZone[]
   scoringInProgress: boolean
   lastScoringMs: number
   habitatIndexReady: boolean
@@ -88,6 +90,7 @@ scoringWorker.onmessage = (e: MessageEvent<WorkerToMain>) => {
     if (msg.reqId !== latestScoreReqId) return
     useBitePlanStore.setState({
       scoredUnits: msg.entries,
+      zones: msg.zones,
       scoringInProgress: false,
       lastScoringMs: msg.ms,
     })
@@ -115,6 +118,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
 
   species: 'all',
   scoredUnits: [],
+  zones: [],
   scoringInProgress: false,
   lastScoringMs: 0,
   habitatIndexReady: false,
@@ -122,7 +126,12 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
   setBounds: (bounds) => set({ bounds }),
-  setCurrentTime: (currentTime) => set({ currentTime }),
+  setCurrentTime: (currentTime) => {
+    set({ currentTime })
+    // Re-score so tide-state, time-of-day, season, etc. all reflect the
+    // scrubbed time. The time slider in Step 10 hits this path on every step.
+    get().recomputeScoredUnits()
+  },
   setSpecies: (species) => set({ species }),
 
   toggleHabitat: (key) =>

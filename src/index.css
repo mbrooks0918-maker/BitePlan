@@ -129,3 +129,42 @@
     @apply font-sans;
     }
 }
+
+/* ------------------------------------------------------------------
+ * Fire dot pulse (Step 7).
+ *
+ * Applied to a div inside a Leaflet DivIcon. Leaflet positions the outer
+ * marker wrapper with translate3d(...); we animate the INNER div so the two
+ * transforms don't conflict. transform: scale() + opacity are GPU-accelerated
+ * and don't trigger layout, so a few hundred pulsing dots stay smooth.
+ * ------------------------------------------------------------------ */
+
+.biteplan-fire-dot {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #ef4444;
+  transform-origin: center;
+  animation: biteplan-fire-pulse 2s ease-in-out infinite;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+@keyframes biteplan-fire-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.4;
+  }
+}
+
+/* Leaflet wraps DivIcon HTML in its own positioned div; make sure that wrapper
+ * is transparent and ignores pointer events (we want taps on the underlying
+ * zone polygon, not the dot). */
+.biteplan-fire-dot-marker {
+  background: transparent !important;
+  pointer-events: none;
+}

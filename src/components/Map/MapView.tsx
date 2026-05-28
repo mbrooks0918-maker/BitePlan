@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
 import DevLayerPanel from './DevLayerPanel'
-import DevScoringPanel from './DevScoringPanel'
+import ScoredZones from './ScoredZones'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 
 const ESRI_TILE_URL =
@@ -130,12 +130,12 @@ function MapView() {
           maxZoom={19}
         />
         <HabitatLayers />
+        <ScoredZones />
         <MapStateSync />
         <InvalidateSizeOnMount />
       </MapContainer>
       <TideReadout />
       <DevLayerPanel />
-      <DevScoringPanel />
     </>
   )
 }

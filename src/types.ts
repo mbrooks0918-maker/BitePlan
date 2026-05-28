@@ -1,4 +1,4 @@
-import type { Geometry } from 'geojson'
+import type { Geometry, MultiPolygon, Polygon } from 'geojson'
 
 export type LatLon = {
   lat: number
@@ -101,4 +101,16 @@ export type ScoringResult = {
   missingFactors: ScoringFactor[]
   /** Filled in by Step 9's projection logic; null for now. */
   projectedNextFire: null
+}
+
+/**
+ * A clustered group of same-tier scored units rendered as one tinted polygon.
+ * Geometry is a convex hull around the cluster's member centroids, buffered
+ * outward by ~50 m so the zone reads as a soft blob rather than a stark
+ * polygon.
+ */
+export type HeatZone = {
+  tier: Tier
+  geometry: Polygon | MultiPolygon
+  memberCount: number
 }
