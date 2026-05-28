@@ -132,14 +132,26 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       unit,
       result: scoreUnit(unit, ctx),
     }))
-    scored.sort((a, b) => b.result.score - a.result.score)
 
-    if (scored.length > msg.maxUnits) {
+    // Tier-priority cap: fires are never hidden behind the cap. Within each
+    // tier we still sort by score descending so the best of each tier wins.
+    const byTier = { fire: [] as ScoredEntry[], hot: [] as ScoredEntry[], driveby: [] as ScoredEntry[] }
+    for (const e of scored) byTier[e.result.tier].push(e)
+    for (const list of [byTier.fire, byTier.hot, byTier.driveby]) {
+      list.sort((a, b) => b.result.score - a.result.score)
+    }
+
+    const capped: ScoredEntry[] = []
+    capped.push(...byTier.fire) // all fires, no cap
+    const remaining = () => Math.max(0, msg.maxUnits - capped.length)
+    capped.push(...byTier.hot.slice(0, remaining()))
+    capped.push(...byTier.driveby.slice(0, remaining()))
+
+    if (scored.length > capped.length) {
       console.warn(
-        `[scoring/worker] capped at ${msg.maxUnits} units (scored ${scored.length} total in view) — Step 20 will lift this`,
+        `[scoring/worker] capped at ${capped.length} units (scored ${scored.length} total in view; kept all ${byTier.fire.length} fires)`,
       )
     }
-    const capped = scored.slice(0, msg.maxUnits)
 
     const reply: ScoredResponseMessage = {
       type: 'scored',

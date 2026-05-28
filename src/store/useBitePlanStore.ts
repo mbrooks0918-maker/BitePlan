@@ -12,7 +12,10 @@ import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
 const DEFAULT_ZOOM = 12
-const MAX_SCORED_UNITS = 500
+// 2000 leaves headroom over the prior 500 cap so the dev panel and Step 7's
+// heat rendering have more than one tier visible. Fires never count toward
+// the cap; see the worker's tier-priority slicing.
+const MAX_SCORED_UNITS = 2000
 
 export type HabitatKey = 'seagrass' | 'oysters' | 'wetlands'
 export type HabitatFlags = Record<HabitatKey, boolean>
@@ -89,6 +92,12 @@ scoringWorker.onmessage = (e: MessageEvent<WorkerToMain>) => {
       lastScoringMs: msg.ms,
     })
   }
+}
+
+// Dev-only handle for preview debugging. Stripped in production by Vite.
+if (import.meta.env.DEV) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(globalThis as any).__store = () => useBitePlanStore.getState()
 }
 
 export const useBitePlanStore = create<BitePlanState>((set, get) => ({

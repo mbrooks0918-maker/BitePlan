@@ -29,11 +29,11 @@ const SOURCES: Array<{ url: string; type: HabitatType }> = [
 ]
 
 const SMALL_POLYGON_SQM = 5000
-// The handoff doc specifies 20-50m sampling. At default zoom 12 the dense end
-// of that range produces hundreds of thousands of units and locks the main
-// thread. We start at 200m here to keep the dev preview responsive and will
-// dial back / push to a worker in Step 20.
-const EDGE_SAMPLE_KM = 0.20 // 200 m (temporary; see comment above)
+// Spec is 20-50 m; we tried 50 m and the cold pass came in at 93 s in the
+// worker (over our 60 s budget). 100 m halves the unit count and brings cold
+// pass under a minute while still giving heat clustering enough resolution.
+// Step 20's perf pass will revisit (likely tile-based incremental scoring).
+const EDGE_SAMPLE_KM = 0.10 // 100 m
 
 type IndexedItem = {
   minX: number
