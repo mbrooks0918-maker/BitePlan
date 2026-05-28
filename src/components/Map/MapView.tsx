@@ -5,6 +5,7 @@ import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
 import DevLayerPanel from './DevLayerPanel'
 import ScoredZones from './ScoredZones'
+import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 
@@ -137,6 +138,7 @@ function MapView() {
       </MapContainer>
       <TideReadout />
       <DevLayerPanel />
+      <ScoringStatus />
       <ZonePopup />
     </>
   )
