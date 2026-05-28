@@ -38,7 +38,7 @@ import {
 } from '@/lib/habitat'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { scoreUnit } from '@/lib/scoring'
-import { getCurrentTideState } from '@/lib/tides'
+import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
 import type {
   Bounds,
   HeatZone,
@@ -94,12 +94,6 @@ export type ScoredResponseMessage = {
 export type WorkerToMain = InitCompleteMessage | ScoredResponseMessage
 
 // ---- helpers -------------------------------------------------------------
-
-function computeDailyTideRange(predictions: TidePrediction[]): number {
-  if (predictions.length === 0) return 1.0
-  const values = predictions.map((p) => p.v)
-  return Math.max(...values) - Math.min(...values)
-}
 
 type ClusterProps = { idx: number; cluster?: number; dbscan?: string }
 
@@ -210,7 +204,7 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       sunrise,
       sunset,
       windSpeedKt: msg.windSpeedKt,
-      dailyTideRangeFt: computeDailyTideRange(msg.tidePredictions),
+      dailyTideRangeFt: dailyTideRange(msg.tidePredictions, time),
       month: time.getMonth() + 1,
       hour: time.getHours(),
     }

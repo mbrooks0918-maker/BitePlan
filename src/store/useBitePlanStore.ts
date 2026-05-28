@@ -8,7 +8,7 @@ import type {
   Species,
 } from '@/types'
 import { getNearestStation, type Station } from '@/lib/stations'
-import { fetchTidePredictions, type TidePrediction } from '@/lib/tides'
+import { assembleTideWindow, type TidePrediction } from '@/lib/tides'
 import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
@@ -194,7 +194,10 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     }
     set({ currentStation: station, tideLoading: true })
     try {
-      const predictions = await fetchTidePredictions(station.id, new Date())
+      // Multi-day window (yesterday + today + tomorrow) so the tide pill and
+      // scoring can bracket across day boundaries — Gulf diurnal days often
+      // publish only one hi/lo per calendar day.
+      const predictions = await assembleTideWindow(station.id, new Date())
       set({ tidePredictions: predictions, tideLoading: false })
       get().recomputeScoredUnits()
     } catch (e) {

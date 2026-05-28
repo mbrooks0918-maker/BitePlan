@@ -47,7 +47,18 @@ function TideReadout() {
     return pill(bg, 'END OF DAY')
   }
 
-  const eventTime = format(parseISO(nextEvent.t), 'h:mm a')
+  const eventDate = parseISO(nextEvent.t)
+  // With the multi-day prediction window, the "next" event is sometimes on
+  // tomorrow (or yesterday's late event). Prefix the day-of-week when it
+  // isn't the same calendar day as `currentTime` so the user isn't surprised
+  // by an apparent past-time reading.
+  const sameDay =
+    eventDate.getFullYear() === currentTime.getFullYear() &&
+    eventDate.getMonth() === currentTime.getMonth() &&
+    eventDate.getDate() === currentTime.getDate()
+  const eventTime = sameDay
+    ? format(eventDate, 'h:mm a')
+    : format(eventDate, 'EEE h:mm a')
   const direction = nextEvent.type === 'H' ? 'high' : 'low'
 
   return pill(

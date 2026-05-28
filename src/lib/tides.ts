@@ -216,6 +216,73 @@ export async function fetchTideCurve(
   }
 }
 
+// --- multi-day window assembly --------------------------------------------
+
+/**
+ * Gulf-coast tides are largely diurnal, and at subordinate NOAA stations
+ * (e.g. Nix Point) a single calendar day may publish only one hi/lo event.
+ * That breaks getCurrentTideState's bracketing — the prev and/or next event
+ * sits on yesterday or tomorrow.
+ *
+ * This helper fetches yesterday + today + tomorrow in parallel and returns a
+ * single time-sorted event list, so callers can bracket across day boundaries
+ * without doing the orchestration themselves. All three fetches reuse the
+ * SWR cache (cache:tide:{stationId}:{YYYYMMDD}) — repeat calls within an hour
+ * cost nothing.
+ *
+ * Any failed day degrades to [] for that day instead of throwing.
+ */
+export async function assembleTideWindow(
+  stationId: string,
+  around: Date,
+): Promise<TidePrediction[]> {
+  const dayMs = 24 * 60 * 60 * 1000
+  const yesterday = new Date(around.getTime() - dayMs)
+  const today = around
+  const tomorrow = new Date(around.getTime() + dayMs)
+
+  const [y, t, tm] = await Promise.all([
+    fetchTidePredictions(stationId, yesterday).catch(() => [] as TidePrediction[]),
+    fetchTidePredictions(stationId, today).catch(() => [] as TidePrediction[]),
+    fetchTidePredictions(stationId, tomorrow).catch(() => [] as TidePrediction[]),
+  ])
+
+  return [...y, ...t, ...tm].sort(
+    (a, b) => parseISO(a.t).getTime() - parseISO(b.t).getTime(),
+  )
+}
+
+/**
+ * Local tide swing — the magnitude between the previous and next hi/lo
+ * events around `around`. Used for the "daily tide range" scoring rule. This
+ * is a slight reinterpretation of the rule (the handoff said "daily" range)
+ * but better matches its intent ("are tides moving energetically right now?")
+ * and works on Gulf diurnal days where a calendar day may only publish one
+ * event.
+ *
+ * Falls back to max−min over all `predictions` when bracketing isn't possible,
+ * and to 1.0 (moderate) when there are no usable events.
+ */
+export function dailyTideRange(predictions: TidePrediction[], around: Date): number {
+  if (predictions.length === 0) return 1.0
+
+  const aroundMs = around.getTime()
+  const sorted = predictions
+    .map((p) => ({ p, ms: parseISO(p.t).getTime() }))
+    .sort((a, b) => a.ms - b.ms)
+
+  const prev = [...sorted].reverse().find((e) => e.ms <= aroundMs) ?? null
+  const next = sorted.find((e) => e.ms > aroundMs) ?? null
+
+  if (prev && next) return Math.abs(prev.p.v - next.p.v)
+
+  if (predictions.length >= 2) {
+    const vs = predictions.map((p) => p.v)
+    return Math.max(...vs) - Math.min(...vs)
+  }
+  return 1.0
+}
+
 // --- synthesised curve (for subordinate stations) -------------------------
 
 const SEMI_DIURNAL_HALF_PERIOD_MS = 6.21 * 60 * 60 * 1000
@@ -315,12 +382,18 @@ export type TideStateInfo = {
 }
 
 /**
- * Classify the current tide.
+ * Classify the current tide using cross-day bracketing.
  *
- * - Within 20 min of any hi/lo (just passed or imminent) → 'slack'
- * - Otherwise, the tide is moving toward the next event:
- *     next.type === 'H' → 'rising'
- *     next.type === 'L' → 'falling'
+ * Caller must pass a multi-day merged event list (use `assembleTideWindow`),
+ * so the prev and next events can sit on yesterday / today / tomorrow. This
+ * matters on Gulf diurnal days where a calendar day may publish only one
+ * hi/lo event — without a wider window, the function couldn't tell whether
+ * the tide is rising or falling on either side of that single event.
+ *
+ * - Within 20 min of either bracketing event → 'slack'.
+ * - Otherwise the tide is heading toward `nextEvent`:
+ *     nextEvent.type === 'H' → 'rising'
+ *     nextEvent.type === 'L' → 'falling'.
  */
 export function getCurrentTideState(
   predictions: TidePrediction[],
@@ -335,14 +408,17 @@ export function getCurrentTideState(
     .map((p) => ({ p, ms: parseISO(p.t).getTime() }))
     .sort((a, b) => a.ms - b.ms)
 
+  // prev = most recent event at-or-before now, anywhere in the window
+  // next = first event strictly after now, anywhere in the window
+  const prev = [...events].reverse().find((e) => e.ms <= nowMs) ?? null
   const next = events.find((e) => e.ms > nowMs) ?? null
+
   if (!next) {
+    // No future event in the window. Best we can do is report slack.
     return { state: 'slack', nextEvent: null, minutesToNext: 0 }
   }
 
   const minutesToNext = Math.round((next.ms - nowMs) / 60_000)
-
-  const prev = [...events].reverse().find((e) => e.ms <= nowMs) ?? null
   const minutesSincePrev =
     prev != null ? Math.round((nowMs - prev.ms) / 60_000) : Number.POSITIVE_INFINITY
 

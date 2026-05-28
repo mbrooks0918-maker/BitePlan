@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import type { ScoringContext, ScoringFactor, Tier } from '@/types'
 import { useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
-import { getCurrentTideState } from '@/lib/tides'
+import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
 import { getCachedProjection, type ProjectionResult } from '@/lib/projection'
 
 // Tier → header background + button background. Spec colors from handoff doc.
@@ -136,11 +136,7 @@ function ZonePopup() {
     const { currentTime, currentStation, tidePredictions, species } = state
     const { state: tideState } = getCurrentTideState(tidePredictions, currentTime)
     const { sunrise, sunset } = getSunTimes(currentTime, currentStation.lat, currentStation.lon)
-    const dailyTideRangeFt =
-      tidePredictions.length === 0
-        ? 1.0
-        : Math.max(...tidePredictions.map((p) => p.v)) -
-          Math.min(...tidePredictions.map((p) => p.v))
+    const dailyTideRangeFt = dailyTideRange(tidePredictions, currentTime)
 
     const ctx: ScoringContext = {
       time: currentTime,

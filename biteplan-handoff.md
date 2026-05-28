@@ -195,6 +195,8 @@ https://api.tidesandcurrents.noaa.gov/api/prod/datagetter
 
 **Critical:** Whenever user pans the map, compute the nearest tide station to map center via haversine. Use that station's predictions for scoring. Cache predictions per station with stale-while-revalidate (1-hour fresh window).
 
+**Cross-day bracketing (also critical):** Gulf-coast tides are largely diurnal, and at subordinate stations (e.g. Nix Point) a single calendar day can publish just one hi/lo event. `getCurrentTideState` must find the previous and next bracketing events EVEN WHEN THEY SIT ON YESTERDAY OR TOMORROW — otherwise any time after the day's single event reads as "slack" forever, falsely killing the tide factor across all afternoon/evening windows. Callers should pass a multi-day merged event list assembled via `assembleTideWindow(stationId, around)` (yesterday + today + tomorrow). The projection engine fetches days −1 → +7 for the same reason. The cache:tide:{stationId}:{YYYYMMDD} SWR cache makes the extra fetches free after the first call.
+
 ### Weather (NOAA NWS API, browser-side, CORS OK)
 
 Step 1: `https://api.weather.gov/points/{lat},{lon}` → returns the grid point office and coordinates.

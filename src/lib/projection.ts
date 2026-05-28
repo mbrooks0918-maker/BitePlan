@@ -11,7 +11,12 @@
  * inside this module so reopening the same popup is O(1).
  */
 
-import { fetchTidePredictions, getCurrentTideState, type TidePrediction } from '@/lib/tides'
+import {
+  dailyTideRange,
+  fetchTidePredictions,
+  getCurrentTideState,
+  type TidePrediction,
+} from '@/lib/tides'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { scoreUnit } from '@/lib/scoring'
 import type { Station } from '@/lib/stations'
@@ -44,11 +49,6 @@ function formatYYYYMMDD(d: Date): string {
   return `${y}${m}${day}`
 }
 
-function computeDailyTideRange(predictions: TidePrediction[]): number {
-  if (predictions.length === 0) return 1.0
-  const values = predictions.map((p) => p.v)
-  return Math.max(...values) - Math.min(...values)
-}
 
 /**
  * Boil a factor's description down to the short angler-readable phrase used
@@ -132,16 +132,16 @@ export async function projectNextFireWindow(
   currentCtx: ScoringContext,
   station: Station,
 ): Promise<ProjectionResult | null> {
-  // 1. Fetch today + next 6 days' tide predictions in parallel.
+  // 1. Fetch a 9-day window: yesterday → +7. The extra day on either side
+  //    lets getCurrentTideState bracket window times that sit near midnight
+  //    (Gulf diurnal cycles can put the bracketing event on an adjacent day).
   const dayDates: Date[] = []
-  for (let d = 0; d < 7; d++) {
+  for (let d = -1; d <= 7; d++) {
     const day = new Date(currentCtx.time)
     day.setDate(day.getDate() + d)
     dayDates.push(day)
   }
 
-  // Per-day fetch wrapped so a single failed day degrades to slack rather
-  // than aborting the whole projection.
   const dayFetches = dayDates.map(async (d) => {
     try {
       return await fetchTidePredictions(station.id, d)
@@ -152,8 +152,9 @@ export async function projectNextFireWindow(
   })
 
   const fetched = await withTimeout(Promise.all(dayFetches), TIMEOUT_MS)
-  const predictionsByDate = new Map<string, TidePrediction[]>()
-  dayDates.forEach((d, i) => predictionsByDate.set(formatYYYYMMDD(d), fetched[i]))
+  // One merged + sorted event list across the whole window — getCurrentTideState
+  // and dailyTideRange both expect a cross-day stream now.
+  const allEvents: TidePrediction[] = fetched.flat()
 
   // 2. Iterate 56 forward windows (skip i=0 — "next" means strictly after now).
   let bestHot: ProjectionResult | null = null
@@ -162,8 +163,7 @@ export async function projectNextFireWindow(
     const windowTime = new Date(
       currentCtx.time.getTime() + i * WINDOW_HOURS * 60 * 60 * 1000,
     )
-    const dayPredictions = predictionsByDate.get(formatYYYYMMDD(windowTime)) ?? []
-    const { state: tideState } = getCurrentTideState(dayPredictions, windowTime)
+    const { state: tideState } = getCurrentTideState(allEvents, windowTime)
     const { sunrise, sunset } = getSunTimes(windowTime, station.lat, station.lon)
 
     const ctx: ScoringContext = {
@@ -176,7 +176,7 @@ export async function projectNextFireWindow(
       // No future wind forecast yet — Step 13 only fills "now". Best-effort
       // is to assume conditions stay roughly like the current moment.
       windSpeedKt: currentCtx.windSpeedKt,
-      dailyTideRangeFt: computeDailyTideRange(dayPredictions),
+      dailyTideRangeFt: dailyTideRange(allEvents, windowTime),
       month: windowTime.getMonth() + 1,
       hour: windowTime.getHours(),
     }
