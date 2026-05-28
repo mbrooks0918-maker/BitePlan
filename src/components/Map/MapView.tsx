@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
 import DevLayerPanel from './DevLayerPanel'
+import DevScoringPanel from './DevScoringPanel'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 
 const ESRI_TILE_URL =
@@ -12,6 +13,7 @@ const ESRI_TILE_URL =
 const ESRI_ATTRIBUTION = 'Tiles &copy; Esri'
 
 const TIDE_DEBOUNCE_MS = 500
+const SCORING_DEBOUNCE_MS = 200
 
 // Leaflet captures the container's pixel size during init. When MapContainer
 // mounts before the document's final layout settles (HMR remount, iframe
@@ -52,26 +54,48 @@ function InvalidateSizeOnMount() {
 function MapStateSync() {
   const setCenter = useBitePlanStore((s) => s.setCenter)
   const setZoom = useBitePlanStore((s) => s.setZoom)
+  const setBounds = useBitePlanStore((s) => s.setBounds)
   const updateTideStation = useBitePlanStore((s) => s.updateTideStation)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const recomputeScoredUnits = useBitePlanStore((s) => s.recomputeScoredUnits)
+  const tideDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scoringDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const map = useMap()
 
-  // Fire once on mount so the tide readout populates without waiting for
-  // a user pan.
+  // On mount: fire the tide fetch and seed the bounds in the store. The
+  // scoring worker self-initializes (kicked off at module load in the store)
+  // and will request the first recompute itself once it's ready.
   useEffect(() => {
     updateTideStation(useBitePlanStore.getState().center)
-  }, [updateTideStation])
+    const b = map.getBounds()
+    setBounds({
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    })
+  }, [updateTideStation, setBounds, map])
 
   useMapEvents({
     moveend(e) {
       const c = e.target.getCenter()
+      const b = e.target.getBounds()
       const newCenter = { lat: c.lat, lon: c.lng }
       setCenter(newCenter)
-      // Debounce so a single drag doesn't fire a dozen NOAA fetches; the
-      // nearest-station only changes when the user lands somewhere new.
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        updateTideStation(newCenter)
-      }, TIDE_DEBOUNCE_MS)
+      setBounds({
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      })
+
+      // Debounce 500ms — only refresh the tide station after the user lands.
+      if (tideDebounce.current) clearTimeout(tideDebounce.current)
+      tideDebounce.current = setTimeout(() => updateTideStation(newCenter), TIDE_DEBOUNCE_MS)
+
+      // Debounce 200ms — per the handoff doc's perf requirement
+      // ("View pan/zoom: scored zones redraw within 300ms").
+      if (scoringDebounce.current) clearTimeout(scoringDebounce.current)
+      scoringDebounce.current = setTimeout(recomputeScoredUnits, SCORING_DEBOUNCE_MS)
     },
     zoomend(e) {
       setZoom(e.target.getZoom())
@@ -111,6 +135,7 @@ function MapView() {
       </MapContainer>
       <TideReadout />
       <DevLayerPanel />
+      <DevScoringPanel />
     </>
   )
 }
