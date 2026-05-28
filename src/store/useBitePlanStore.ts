@@ -19,6 +19,52 @@ import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
 const DEFAULT_ZOOM = 12
+
+// Auto-activation window for Trip Mode (handoff doc, locked):
+//   May 30, 2026 → June 14, 2026 inclusive
+// The window is intentionally a few days wider than the actual June 1–12
+// trip so the picker is already focused on the trip cards before the user
+// leaves home (May 30/31) and stays put for a "review the trip" day after
+// (June 13/14). Month indexes here are 0-based.
+const TRIP_AUTO_START_MS = new Date(2026, 4, 30, 0, 0, 0, 0).getTime() // May 30 00:00 local
+const TRIP_AUTO_END_MS = new Date(2026, 5, 15, 0, 0, 0, 0).getTime() // June 15 00:00 local (exclusive)
+const TRIP_STORAGE_KEY = 'trip:active' // per handoff doc storage keys
+
+/**
+ * Resolves whether Trip Mode is currently active. `override` comes from the
+ * Zustand store and reflects user intent (null = follow auto, true = force on,
+ * false = force off). When null, the auto-window decides.
+ */
+export function isTripModeActive(
+  override: boolean | null,
+  today: Date = new Date(),
+): boolean {
+  if (override !== null) return override
+  const ms = today.getTime()
+  return ms >= TRIP_AUTO_START_MS && ms < TRIP_AUTO_END_MS
+}
+
+function loadTripOverride(): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(TRIP_STORAGE_KEY)
+    if (raw === null || raw === '') return null
+    return raw === 'true'
+  } catch {
+    return null
+  }
+}
+
+function saveTripOverride(value: boolean | null): void {
+  try {
+    if (value === null) {
+      window.localStorage.removeItem(TRIP_STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(TRIP_STORAGE_KEY, String(value))
+    }
+  } catch {
+    // Storage unavailable; non-fatal.
+  }
+}
 // 2000 leaves headroom over the prior 500 cap so the dev panel and Step 7's
 // heat rendering have more than one tier visible. Fires never count toward
 // the cap; see the worker's tier-priority slicing.
@@ -60,6 +106,8 @@ type BitePlanState = {
   timeMode: TimeMode
   dayConditions: DayCondition[]
   dayConditionsLoading: boolean
+  /** User override for Trip Mode. null = follow auto-window; true/false = manual. */
+  tripModeOverride: boolean | null
 
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
@@ -68,6 +116,7 @@ type BitePlanState = {
   setSpecies: (species: Species) => void
   selectZone: (payload: ScoredEntry | null) => void
   setTimeMode: (mode: TimeMode) => void
+  setTripModeOverride: (value: boolean | null) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -201,6 +250,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   timeMode: '24h',
   dayConditions: [],
   dayConditionsLoading: false,
+  tripModeOverride: loadTripOverride(),
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -221,6 +271,12 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     if (mode === '7day' && get().dayConditions.length === 0 && get().habitatIndexReady) {
       void get().recomputeDayConditions(new Date(), 7)
     }
+  },
+  setTripModeOverride: (value) => {
+    saveTripOverride(value)
+    set({ tripModeOverride: value })
+    // Recompute will be triggered by the picker components when their
+    // (startDate, dayCount) changes — no work here.
   },
 
   toggleHabitat: (key) =>

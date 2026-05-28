@@ -4,21 +4,28 @@
  * Step 16's bottom sheet will host both modes.
  */
 
+import { useMemo } from 'react'
+import { startOfDay } from 'date-fns'
 import DayPicker from './DayPicker'
 import ModeToggle from './ModeToggle'
+import TripToggle from '@/components/Trip/TripToggle'
 
 function DayPickerStrip() {
+  const startDate = useMemo(() => startOfDay(new Date()), [])
   return (
     <div
       // Mirrors TimeSlider's container so the visual position doesn't jump
       // when the user toggles modes.
       className="fixed bottom-3 inset-x-3 sm:inset-x-6 z-[1000] bg-slate-900/85 backdrop-blur-sm rounded-2xl shadow-xl px-4 pt-3 pb-3"
     >
-      <div className="flex items-center justify-between mb-2">
-        <ModeToggle />
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="flex items-center gap-2">
+          <ModeToggle />
+          <TripToggle />
+        </div>
         <div className="text-xs text-slate-400">Next 7 days</div>
       </div>
-      <DayPicker />
+      <DayPicker startDate={startDate} dayCount={7} />
     </div>
   )
 }

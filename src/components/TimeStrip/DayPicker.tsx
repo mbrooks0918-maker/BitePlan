@@ -98,7 +98,14 @@ function DayCard({
   )
 }
 
-function DayPicker() {
+type DayPickerProps = {
+  /** Midnight of the first day to render. */
+  startDate: Date
+  /** Number of consecutive day cards to show. 7 in the generic picker, 12 in Trip Mode. */
+  dayCount: number
+}
+
+function DayPicker({ startDate, dayCount }: DayPickerProps) {
   const dayConditions = useBitePlanStore((s) => s.dayConditions)
   const loading = useBitePlanStore((s) => s.dayConditionsLoading)
   const setCurrentTime = useBitePlanStore((s) => s.setCurrentTime)
@@ -107,15 +114,16 @@ function DayPicker() {
   const bounds = useBitePlanStore((s) => s.bounds)
   const habitatIndexReady = useBitePlanStore((s) => s.habitatIndexReady)
 
-  // Recompute when the visible bounds change (debounce-friendly: store dedupes
-  // identical signatures). startOfDay key avoids re-triggering across hour
-  // changes — the picker doesn't care about sub-day clock shifts.
-  const today = useMemo(() => startOfDay(new Date()), [])
+  // Recompute when the visible bounds change or the range parameters shift
+  // (e.g. user flipped Trip Mode and dayCount jumped from 7 to 12). The
+  // store's signature dedup skips identical re-requests.
+  const startKey = startDate.toDateString()
   useEffect(() => {
     if (!habitatIndexReady || !bounds) return
-    void recomputeDayConditions(today, 7)
-  }, [habitatIndexReady, bounds, recomputeDayConditions, today])
+    void recomputeDayConditions(startDate, dayCount)
+  }, [habitatIndexReady, bounds, recomputeDayConditions, startKey, dayCount, startDate])
 
+  const today = useMemo(() => startOfDay(new Date()), [])
   const todayMs = today.getTime()
   const currentDayKey = format(currentTime, 'yyyy-MM-dd')
 

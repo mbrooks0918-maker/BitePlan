@@ -10,6 +10,8 @@ import ZonePopup from './ZonePopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
 import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
+import TripStrip from '@/components/Trip/TripStrip'
+import { isTripModeActive } from '@/store/useBitePlanStore'
 
 const ESRI_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -113,6 +115,8 @@ function MapView() {
   const center = useBitePlanStore((s) => s.center)
   const zoom = useBitePlanStore((s) => s.zoom)
   const timeMode = useBitePlanStore((s) => s.timeMode)
+  const tripOverride = useBitePlanStore((s) => s.tripModeOverride)
+  const tripActive = isTripModeActive(tripOverride)
 
   return (
     <>
@@ -142,7 +146,13 @@ function MapView() {
       <TideReadout />
       <DevLayerPanel />
       <ScoringStatus />
-      {timeMode === '24h' ? <TimeSlider /> : <DayPickerStrip />}
+      {timeMode === '24h' ? (
+        <TimeSlider />
+      ) : tripActive ? (
+        <TripStrip />
+      ) : (
+        <DayPickerStrip />
+      )}
       <ZonePopup />
     </>
   )
