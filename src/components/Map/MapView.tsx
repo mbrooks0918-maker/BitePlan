@@ -8,6 +8,7 @@ import ScoredZones from './ScoredZones'
 import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
+import TimeSlider from '@/components/TimeStrip/TimeSlider'
 
 const ESRI_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -139,6 +140,7 @@ function MapView() {
       <TideReadout />
       <DevLayerPanel />
       <ScoringStatus />
+      <TimeSlider />
       <ZonePopup />
     </>
   )

@@ -74,6 +74,16 @@ const scoringWorker = new Worker(
 let nextReqId = 1
 let latestScoreReqId = 0
 
+// Debounce timer for setCurrentTime → recompute. See setCurrentTime below.
+let timeRecomputeTimeout: ReturnType<typeof setTimeout> | null = null
+function scheduleTimeRecompute(fn: () => void): void {
+  if (timeRecomputeTimeout) clearTimeout(timeRecomputeTimeout)
+  timeRecomputeTimeout = setTimeout(() => {
+    timeRecomputeTimeout = null
+    fn()
+  }, 100)
+}
+
 // Signature of the in-flight score request. Used to skip redundant recomputes
 // fired during initial load — the worker init-complete callback, the mount-
 // time updateTideStation, the map's initial moveend, and invalidateSize's
@@ -163,9 +173,10 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   setBounds: (bounds) => set({ bounds }),
   setCurrentTime: (currentTime) => {
     set({ currentTime })
-    // Re-score so tide-state, time-of-day, season, etc. all reflect the
-    // scrubbed time. The time slider in Step 10 hits this path on every step.
-    get().recomputeScoredUnits()
+    // Debounce the rescore: during slider drags this can fire 30+ times a
+    // second, which would queue dozens of worker passes. 100 ms is "live
+    // enough" for visual feedback while bounding total work.
+    scheduleTimeRecompute(() => get().recomputeScoredUnits())
   },
   setSpecies: (species) => set({ species }),
   selectZone: (payload) => set({ selectedZone: payload }),
