@@ -52,9 +52,17 @@ import type { TidePrediction } from '@/lib/tides'
 
 // ---- knobs ---------------------------------------------------------------
 
-const CLUSTER_RADIUS_KM = 0.3 // ~300 m proximity per the handoff doc
+// Handoff doc said ~300 m. At our 100 m edge sampling, DBSCAN reachability
+// still chains continuous coastline edges into mega-clusters of thousands of
+// points whose convex hulls span whole bays. Two combined mitigations:
+//   1. Tighter eps (100 m) breaks SOME chains at meaningful gaps.
+//   2. ZONE_MAX_MEMBERS caps any single zone polygon. Clusters bigger than
+//      that still render their dots — they just don't get a misleading
+//      whole-bay convex hull underneath.
+const CLUSTER_RADIUS_KM = 0.1 // 100 m DBSCAN eps
 const CLUSTER_MIN_POINTS = 3  // clusters of 1-2 don't get a zone polygon
 const ZONE_BUFFER_KM = 0.05   // 50 m outward buffer on the convex hull
+const ZONE_MAX_MEMBERS = 200  // skip the polygon for very large chained clusters
 
 // ---- message protocol ----------------------------------------------------
 
@@ -131,6 +139,9 @@ function clusterIntoZones(entries: ScoredEntry[]): HeatZone[] {
 
     for (const members of groups.values()) {
       if (members.length < CLUSTER_MIN_POINTS) continue
+      // Convex hull of a long chained coastline is a misleading giant blob.
+      // Don't draw it; dots still render so the heat is visible.
+      if (members.length > ZONE_MAX_MEMBERS) continue
       const memberFC = featureCollection(members)
       const hull = convex(memberFC)
       if (!hull) continue
