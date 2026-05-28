@@ -5,6 +5,7 @@ import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
 import DevLayerPanel from './DevLayerPanel'
 import ScoredZones from './ScoredZones'
+import ZonePopup from './ZonePopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 
 const ESRI_TILE_URL =
@@ -136,6 +137,7 @@ function MapView() {
       </MapContainer>
       <TideReadout />
       <DevLayerPanel />
+      <ZonePopup />
     </>
   )
 }

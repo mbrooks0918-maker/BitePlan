@@ -7,6 +7,10 @@
  *   3. Red dots as DivIcons (DOM, naturally above the canvas pane) — these
  *      pulse via CSS.
  *
+ * Step 8 made every layer interactive: clicking a polygon opens the popup
+ * against the cluster's top scoring member; clicking a dot opens it against
+ * that dot's specific scored unit.
+ *
  * preferCanvas={true} on the MapContainer means every Path layer (GeoJSON,
  * CircleMarker) shares one canvas; their visual stacking is determined by
  * the order they're added to the map. React mounts children in source order,
@@ -61,6 +65,7 @@ const FIRE_DOT_ICON = L.divIcon({
 function ScoredZones() {
   const zones = useBitePlanStore((s) => s.zones)
   const scoredUnits = useBitePlanStore((s) => s.scoredUnits)
+  const selectZone = useBitePlanStore((s) => s.selectZone)
 
   // Split per tier for deterministic z-order.
   const { yellowZones, orangeZones, redZones } = useMemo(
@@ -89,7 +94,7 @@ function ScoredZones() {
           key={`z-driveby-${i}`}
           data={z.geometry}
           style={() => ZONE_STYLE.driveby}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone({ unit: z.topUnit, result: z.topResult }) }}
         />
       ))}
       {orangeZones.map((z, i) => (
@@ -97,7 +102,7 @@ function ScoredZones() {
           key={`z-hot-${i}`}
           data={z.geometry}
           style={() => ZONE_STYLE.hot}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone({ unit: z.topUnit, result: z.topResult }) }}
         />
       ))}
       {redZones.map((z, i) => (
@@ -105,44 +110,50 @@ function ScoredZones() {
           key={`z-fire-${i}`}
           data={z.geometry}
           style={() => ZONE_STYLE.fire}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone({ unit: z.topUnit, result: z.topResult }) }}
         />
       ))}
 
       {/* ----- 2. Dots: bottom → top, same tier order ----- */}
-      {yellowUnits.map((e) => (
+      {/* Keys include the array index because the Step 3 wetlands tile fetch
+       *  returned a small number of duplicate features at tile seams, which
+       *  surface here as identical unit.id values. Index-prefixed keys keep
+       *  React happy without us having to dedup at the data layer. */}
+      {yellowUnits.map((e, i) => (
         <CircleMarker
-          key={`d-driveby-${e.unit.id}`}
+          key={`d-driveby-${i}-${e.unit.id}`}
           center={[e.unit.centroid[1], e.unit.centroid[0]]}
           radius={8}
           pathOptions={YELLOW_DOT}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone(e) }}
         />
       ))}
-      {orangeUnits.map((e) => (
+      {orangeUnits.map((e, i) => (
+        // The halo is purely decorative — let clicks fall through to the dot
+        // below it so we don't have two layers fighting over the same tap.
         <CircleMarker
-          key={`d-hot-halo-${e.unit.id}`}
+          key={`d-hot-halo-${i}-${e.unit.id}`}
           center={[e.unit.centroid[1], e.unit.centroid[0]]}
           radius={14}
           pathOptions={ORANGE_HALO}
           interactive={false}
         />
       ))}
-      {orangeUnits.map((e) => (
+      {orangeUnits.map((e, i) => (
         <CircleMarker
-          key={`d-hot-${e.unit.id}`}
+          key={`d-hot-${i}-${e.unit.id}`}
           center={[e.unit.centroid[1], e.unit.centroid[0]]}
           radius={10}
           pathOptions={ORANGE_DOT}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone(e) }}
         />
       ))}
-      {redUnits.map((e) => (
+      {redUnits.map((e, i) => (
         <Marker
-          key={`d-fire-${e.unit.id}`}
+          key={`d-fire-${i}-${e.unit.id}`}
           position={[e.unit.centroid[1], e.unit.centroid[0]]}
           icon={FIRE_DOT_ICON}
-          interactive={false}
+          eventHandlers={{ click: () => selectZone(e) }}
         />
       ))}
     </>

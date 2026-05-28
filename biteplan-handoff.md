@@ -216,9 +216,10 @@ The heart of the app. No preloaded fishing spots. The engine scores habitat poly
    - `unit`: `{ type: 'seagrass'|'oyster'|'wetland'|'edge', geometry, depthBucket?, adjacentTo? }`
    - `ctx`: `{ tideState, hour, species, moon, wind, date, station }`
 4. **Cluster scored units into heat zones:**
-   - Group nearby units of the same tier
-   - Compute convex hull + small buffer (turf.js)
-   - Render as soft-shaded zones in tier color
+   - Group nearby units of the same tier (DBSCAN-style, 100m epsilon)
+   - For clusters of 3-200 members: compute convex hull + 50m buffer (turf.js) and render as a soft-shaded zone in tier color
+   - For clusters of 200+ members (e.g., continuous coastline grass beds): SKIP the polygon — the per-unit dots are the heat indicator. A convex hull over hundreds of points along a long coastline produces a misleading bay-spanning ribbon that doesn't reflect where the bite actually is. The dots already cluster visually wherever the density is.
+   - Cluster eps is tied to edge sample density (currently 100m) — increase eps if edge sampling tightens in a future perf pass.
 5. **Render individual scored units** as small colored dots/lines on top of heat zones for fine detail when zoomed in
 
 ### Scoring rules — TypeScript types

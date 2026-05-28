@@ -108,9 +108,15 @@ export type ScoringResult = {
  * Geometry is a convex hull around the cluster's member centroids, buffered
  * outward by ~50 m so the zone reads as a soft blob rather than a stark
  * polygon.
+ *
+ * topUnit/topResult are the highest-scoring member of the cluster — used when
+ * the user taps the zone polygon and we need to open the popup against a
+ * single representative unit.
  */
 export type HeatZone = {
   tier: Tier
   geometry: Polygon | MultiPolygon
   memberCount: number
+  topUnit: ScoringUnit
+  topResult: ScoringResult
 }

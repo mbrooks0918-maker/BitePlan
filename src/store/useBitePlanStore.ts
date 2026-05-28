@@ -44,11 +44,16 @@ type BitePlanState = {
   lastScoringMs: number
   habitatIndexReady: boolean
 
+  // The unit currently shown in the zone popup, or null when the popup is
+  // dismissed. Set by clicking a heat zone polygon or an individual dot.
+  selectedZone: ScoredEntry | null
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
   setCurrentTime: (currentTime: Date) => void
   setSpecies: (species: Species) => void
+  selectZone: (payload: ScoredEntry | null) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -122,6 +127,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   scoringInProgress: false,
   lastScoringMs: 0,
   habitatIndexReady: false,
+  selectedZone: null,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -133,6 +139,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     get().recomputeScoredUnits()
   },
   setSpecies: (species) => set({ species }),
+  selectZone: (payload) => set({ selectedZone: payload }),
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

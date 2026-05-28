@@ -129,12 +129,14 @@ function clusterIntoZones(entries: ScoredEntry[]): HeatZone[] {
       minPoints: CLUSTER_MIN_POINTS,
     }) as FeatureCollection<Point, ClusterProps>
 
-    const groups = new Map<number, Feature<Point, ClusterProps>[]>()
+    type Member = { feature: Feature<Point, ClusterProps>; entry: ScoredEntry }
+    const groups = new Map<number, Member[]>()
     for (const f of clustered.features) {
       if (f.properties.dbscan === 'noise' || f.properties.cluster == null) continue
       const id = f.properties.cluster
+      const entry = tierEntries[f.properties.idx]
       if (!groups.has(id)) groups.set(id, [])
-      groups.get(id)!.push(f)
+      groups.get(id)!.push({ feature: f, entry })
     }
 
     for (const members of groups.values()) {
@@ -142,15 +144,23 @@ function clusterIntoZones(entries: ScoredEntry[]): HeatZone[] {
       // Convex hull of a long chained coastline is a misleading giant blob.
       // Don't draw it; dots still render so the heat is visible.
       if (members.length > ZONE_MAX_MEMBERS) continue
-      const memberFC = featureCollection(members)
+      const memberFC = featureCollection(members.map((m) => m.feature))
       const hull = convex(memberFC)
       if (!hull) continue
       const buffered = turfBuffer(hull, ZONE_BUFFER_KM, { units: 'kilometers' })
       if (!buffered) continue
+      // Top member of the cluster, used as the representative when the user
+      // taps the zone polygon and the popup needs one unit/result to show.
+      const top = members.reduce(
+        (best, m) => (m.entry.result.score > best.entry.result.score ? m : best),
+        members[0],
+      )
       zones.push({
         tier,
         geometry: buffered.geometry as HeatZone['geometry'],
         memberCount: members.length,
+        topUnit: top.entry.unit,
+        topResult: top.entry.result,
       })
     }
   }
