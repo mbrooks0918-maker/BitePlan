@@ -17,7 +17,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { format } from 'date-fns'
-import { Check, Navigation, X as XIcon } from 'lucide-react'
+import { Check, KeyRound, Lock, Navigation, X as XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ScoringContext, ScoringFactor, Tier } from '@/types'
 import { useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
@@ -177,7 +177,17 @@ function ZonePopup() {
   const { unit, result } = selectedZone
   const tier = result.tier
   const isLowTier = tier === 'driveby'
-  const factorsToShow = isLowTier ? result.missingFactors : result.firedFactors
+
+  // Convergence factors get their own popup sections — unlocking (≥ 2
+  // different tag types) vs partial (single tag type). Everything else
+  // renders in the standard "why it's hot/driveby" list.
+  const tagTypes = new Set(unit.convergence.map((t) => t.type))
+  const isUnlocked = tagTypes.size >= 2
+  const convergenceFired = result.firedFactors.filter((f) => f.category === 'convergence')
+  const convergenceMissing = result.missingFactors.filter((f) => f.category === 'convergence')
+  const otherFiredFactors = result.firedFactors.filter((f) => f.category !== 'convergence')
+  const otherMissingFactors = result.missingFactors.filter((f) => f.category !== 'convergence')
+  const factorsToShow = isLowTier ? otherMissingFactors : otherFiredFactors
   const sectionHeading = isLowTier
     ? "Why it's not better right now:"
     : `Why it's ${tier} right now:`
@@ -287,6 +297,47 @@ function ZonePopup() {
             </ul>
           )}
         </section>
+
+        {/* Convergence — either the unlocking set (2+ different types) or the
+         *  partial set (single type, doesn't unlock). Each path also shows
+         *  the matching missing-factor explanation. */}
+        {isUnlocked && convergenceFired.length > 0 && (
+          <section className="px-4 py-3 border-t border-slate-800">
+            <div className="text-xs font-medium uppercase tracking-wider text-emerald-400 mb-2 flex items-center gap-1.5">
+              <KeyRound className="size-3.5" />
+              Structural features unlocking this score
+            </div>
+            <ul className="space-y-1 text-sm">
+              {convergenceFired.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-slate-200">
+                  <KeyRound className="size-4 shrink-0 mt-0.5 text-emerald-400" />
+                  <span>{f.description}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {!isUnlocked && (convergenceFired.length > 0 || convergenceMissing.length > 0) && (
+          <section className="px-4 py-3 border-t border-slate-800 opacity-90">
+            <div className="text-xs font-medium uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+              <Lock className="size-3.5" />
+              Partial structure
+            </div>
+            <ul className="space-y-1 text-sm">
+              {convergenceFired.map((f, i) => (
+                <li key={`p-${i}`} className="flex items-start gap-2 text-slate-400">
+                  <Lock className="size-4 shrink-0 mt-0.5 text-slate-500" />
+                  <span>{f.description}</span>
+                </li>
+              ))}
+              {convergenceMissing.map((f, i) => (
+                <li key={`m-${i}`} className="flex items-start gap-2 text-slate-500 italic pt-1">
+                  <span>{f.description}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {/* Forward projection */}
         <section className="px-4 py-3 border-t border-slate-800">

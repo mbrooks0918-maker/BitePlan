@@ -262,23 +262,22 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   const tagTypes = new Set(unit.convergence.map((t) => t.type))
   const hasMultiConvergence = tagTypes.size >= 2
 
+  // Tags fire with delta 0. The popup separates them into "unlocking"
+  // (hasMultiConvergence) vs "partial structure" (single-type) sections, so
+  // we don't need to suffix the description with that distinction here.
   for (const tag of unit.convergence) {
-    const label = hasMultiConvergence ? 'structural feature' : 'partial structure'
-    add(factor(true, 0, `${tag.description} — ${label}`, 'convergence'))
+    add(factor(true, 0, tag.description, 'convergence'))
   }
 
-  // Surface a single combined "missing" line so the popup explains WHY the
-  // unit's score is capped. Three states:
-  //   1) No tags at all                → "No structural feature here"
-  //   2) One tag (or multiple same-type) → "Only X here — needs a different type to unlock"
-  //   3) Two+ different types          → no missing line (unit unlocked)
+  // Specific missing-factor wording per the v3 directive — the angler should
+  // understand exactly why this spot is capped.
   if (!hasMultiConvergence) {
     if (tagTypes.size === 0) {
       add(
         factor(
           false,
           0,
-          'No structural feature here — capped at driveby',
+          'No structural feature here — needs at least 2 feature types to unlock',
           'convergence',
         ),
       )
@@ -286,15 +285,16 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
       const onlyType = Array.from(tagTypes)[0]
       const label =
         onlyType === 'point'
-          ? 'a point'
+          ? 'point'
           : onlyType === 'creek_mouth'
-            ? 'a creek mouth'
-            : 'a habitat transition'
+            ? 'creek mouth'
+            : 'habitat transition'
       add(
         factor(
           false,
           0,
-          `Only ${label} here — needs a second convergence type to unlock`,
+          `Only one feature type (${label} only) — needs a second type ` +
+            `(point + transition, creek mouth + transition, etc.) to unlock`,
           'convergence',
         ),
       )
