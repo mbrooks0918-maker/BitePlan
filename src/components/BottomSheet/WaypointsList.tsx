@@ -1,21 +1,16 @@
 /**
- * Saved Waypoints list (Step 15).
+ * Saved Waypoints list (Step 15 → embedded in BottomSheet Full at Step 16).
  *
- * Companion to the map-pin view: a scrollable, sortable list of every
- * saved waypoint. Tap a row → map flies to that pin + opens its popup.
- * Two-tap inline delete on each row mirrors the SavedWaypointPopup
- * pattern so muscle-memory is consistent.
+ * A scrollable, sortable list of every saved waypoint. Tap a row → map
+ * flies to that pin + opens its popup. Two-tap inline delete on each row
+ * mirrors the SavedWaypointPopup pattern so muscle-memory is consistent.
  *
- * TEMPORARY placement — moves into BottomSheet Full snap-point in Step 16.
- *
- * Floats above the time strip in the bottom-right corner with internal
- * scroll. Collapsed-by-default so it doesn't crowd the map view until the
- * user opens it. Once it lives inside the bottom sheet, the collapse
- * behaviour becomes the sheet's peek/half/full snap.
+ * Step 16 dropped the floating placement and the local collapse/expand
+ * toggle — the bottom sheet's Full snap is the new "expanded" surface.
  */
 import { useEffect, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { Bookmark, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { Bookmark, Trash2 } from 'lucide-react'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
 import type { Tier, Waypoint } from '@/types'
 
@@ -130,8 +125,6 @@ function WaypointsList() {
   const waypoints = useBitePlanStore((s) => s.waypoints)
   const deleteWaypoint = useBitePlanStore((s) => s.deleteWaypoint)
   const flyToWaypoint = useBitePlanStore((s) => s.flyToWaypoint)
-
-  const [expanded, setExpanded] = useState(false)
   const listRef = useRef<HTMLUListElement | null>(null)
 
   // Most-recent first per the spec; the store stores ascending so we sort
@@ -140,71 +133,38 @@ function WaypointsList() {
   const count = sorted.length
 
   return (
-    <div
-      // bottom-32 clears the time strip (TimeSlider / DayPickerStrip /
-      // TripStrip all sit in the bottom ~120 px). Width capped so the list
-      // can't dominate small screens.
-      className="fixed bottom-32 right-4 z-[1050] w-[min(92vw,20rem)] pointer-events-auto"
-    >
-      <div className="bg-slate-900/95 text-slate-100 rounded-lg shadow-2xl border border-slate-700/60 backdrop-blur-sm overflow-hidden">
-        {/* Header — always visible; doubles as the expand/collapse toggle. */}
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          aria-controls="saved-waypoints-list"
-          className="w-full flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-800/60 focus-visible:bg-slate-800/60 focus-visible:outline-none"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <Bookmark className="size-4 text-slate-300" />
-            <span className="text-sm font-medium">Saved Waypoints</span>
-            <span className="text-xs text-slate-400">({count})</span>
-          </div>
-          {expanded ? (
-            <ChevronDown className="size-4 text-slate-400" />
-          ) : (
-            <ChevronUp className="size-4 text-slate-400" />
-          )}
-        </button>
-
-        {expanded && (
-          <div
-            // Cap the panel to 60vh so it never overlaps the entire map,
-            // and let the inner list scroll within.
-            className="border-t border-slate-700/60"
-            style={{ maxHeight: '60vh' }}
-          >
-            {count === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center px-6 py-10">
-                <Bookmark className="size-7 text-slate-600 mb-3" />
-                <p className="text-sm text-slate-300 leading-snug">
-                  No saved waypoints yet.
-                </p>
-                <p className="text-xs text-slate-500 mt-1 leading-snug">
-                  Tap any zone, then ‘Save Waypoint’ to bookmark a spot.
-                </p>
-              </div>
-            ) : (
-              <ul
-                id="saved-waypoints-list"
-                ref={listRef}
-                className="overflow-y-auto divide-y divide-slate-700/60"
-                style={{ maxHeight: 'calc(60vh - 0px)' }}
-              >
-                {sorted.map((wp) => (
-                  <Row
-                    key={wp.id}
-                    wp={wp}
-                    onSelect={flyToWaypoint}
-                    onDeleteConfirmed={deleteWaypoint}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+    <section aria-label="Saved waypoints" className="mt-4">
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 px-1 flex items-center gap-1.5">
+        <Bookmark className="size-3.5" /> Saved Waypoints
+        <span className="text-slate-500 normal-case ml-1">({count})</span>
       </div>
-    </div>
+      {count === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center px-6 py-8 bg-slate-800/30 rounded-md border border-slate-800">
+          <Bookmark className="size-7 text-slate-600 mb-3" />
+          <p className="text-sm text-slate-300 leading-snug">
+            No saved waypoints yet.
+          </p>
+          <p className="text-xs text-slate-500 mt-1 leading-snug">
+            Tap any zone, then ‘Save Waypoint’ to bookmark a spot.
+          </p>
+        </div>
+      ) : (
+        <ul
+          id="saved-waypoints-list"
+          ref={listRef}
+          className="rounded-md overflow-hidden border border-slate-800 divide-y divide-slate-800"
+        >
+          {sorted.map((wp) => (
+            <Row
+              key={wp.id}
+              wp={wp}
+              onSelect={flyToWaypoint}
+              onDeleteConfirmed={deleteWaypoint}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 

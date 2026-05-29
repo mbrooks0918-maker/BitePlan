@@ -25,7 +25,7 @@ import {
   type TidePrediction,
 } from '@/lib/tides'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
-import ModeToggle from './ModeToggle'
+// Step 16: ModeToggle moved to SheetContent.
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const SNAP_WINDOW_MIN = 15
@@ -230,12 +230,14 @@ function TimeSlider() {
 
   return (
     <div
-      // Temporary placement. Step 16's bottom sheet will host this.
-      className="fixed bottom-3 inset-x-3 sm:inset-x-6 z-[1000] bg-slate-900/85 backdrop-blur-sm rounded-2xl shadow-xl px-4 pt-3 pb-4"
+      // Step 16: embedded inside the BottomSheet's Half snap. The sheet
+      // owns the surrounding card chrome (slate background, rounded
+      // corners). The slider itself just lays out its own track + thumb.
+      className="relative w-full"
     >
-      {/* Header row */}
-      <div className="flex items-center justify-between mb-2 gap-3">
-        <ModeToggle />
+      {/* Header row — mode toggle moved to SheetContent so we don't render
+          it here twice; this row keeps only the current-time readout. */}
+      <div className="flex items-center justify-end mb-2 gap-3">
         <div className="flex items-baseline gap-3 ml-auto">
           <div className="text-slate-100 text-sm">
             <span className="text-slate-400 mr-2">

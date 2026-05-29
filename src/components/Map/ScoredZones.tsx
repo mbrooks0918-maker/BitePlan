@@ -66,24 +66,43 @@ function ScoredZones() {
   const zones = useBitePlanStore((s) => s.zones)
   const scoredUnits = useBitePlanStore((s) => s.scoredUnits)
   const selectZone = useBitePlanStore((s) => s.selectZone)
+  const tierFilter = useBitePlanStore((s) => s.tierFilter)
+
+  // Step 16 tier filter — hide driveby (and optionally hot) when the user
+  // asks for fire+ / hot+ chips at the Half snap. We filter both the zone
+  // polygons and the per-unit dots so the map and the in-sheet
+  // TopZonesList stay visually in sync.
+  const tierAllowed = (t: 'fire' | 'hot' | 'driveby'): boolean => {
+    if (tierFilter === 'all') return true
+    if (tierFilter === 'fire+') return t === 'fire'
+    return t === 'fire' || t === 'hot'
+  }
 
   // Split per tier for deterministic z-order.
   const { yellowZones, orangeZones, redZones } = useMemo(
     () => ({
-      yellowZones: zones.filter((z) => z.tier === 'driveby'),
-      orangeZones: zones.filter((z) => z.tier === 'hot'),
-      redZones: zones.filter((z) => z.tier === 'fire'),
+      yellowZones: tierAllowed('driveby') ? zones.filter((z) => z.tier === 'driveby') : [],
+      orangeZones: tierAllowed('hot') ? zones.filter((z) => z.tier === 'hot') : [],
+      redZones: tierAllowed('fire') ? zones.filter((z) => z.tier === 'fire') : [],
     }),
-    [zones],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [zones, tierFilter],
   )
 
   const { yellowUnits, orangeUnits, redUnits } = useMemo(
     () => ({
-      yellowUnits: scoredUnits.filter((e) => e.result.tier === 'driveby'),
-      orangeUnits: scoredUnits.filter((e) => e.result.tier === 'hot'),
-      redUnits: scoredUnits.filter((e) => e.result.tier === 'fire'),
+      yellowUnits: tierAllowed('driveby')
+        ? scoredUnits.filter((e) => e.result.tier === 'driveby')
+        : [],
+      orangeUnits: tierAllowed('hot')
+        ? scoredUnits.filter((e) => e.result.tier === 'hot')
+        : [],
+      redUnits: tierAllowed('fire')
+        ? scoredUnits.filter((e) => e.result.tier === 'fire')
+        : [],
     }),
-    [scoredUnits],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scoredUnits, tierFilter],
   )
 
   return (

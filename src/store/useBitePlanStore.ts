@@ -50,6 +50,27 @@ const TRIP_AUTO_START_MS = new Date(2026, 4, 30, 0, 0, 0, 0).getTime() // May 30
 const TRIP_AUTO_END_MS = new Date(2026, 5, 15, 0, 0, 0, 0).getTime() // June 15 00:00 local (exclusive)
 const TRIP_STORAGE_KEY = 'trip:active' // per handoff doc storage keys
 
+// Step 16 — bottom-sheet snap-point persistence so the user's preferred
+// sheet position survives reload.
+const SHEET_SNAP_STORAGE_KEY = 'settings:sheetSnap'
+export type SheetSnapPoint = 'peek' | 'half' | 'full'
+function loadSheetSnap(): SheetSnapPoint {
+  try {
+    const raw = window.localStorage.getItem(SHEET_SNAP_STORAGE_KEY)
+    if (raw === 'peek' || raw === 'half' || raw === 'full') return raw
+  } catch {}
+  return 'half'
+}
+function saveSheetSnap(s: SheetSnapPoint): void {
+  try {
+    window.localStorage.setItem(SHEET_SNAP_STORAGE_KEY, s)
+  } catch {}
+}
+
+// Step 16 — tier filter chips at the Half snap. 'all' shows every scored
+// unit; 'fire+' keeps fires only; 'hot+' keeps hot + fire.
+export type TierFilter = 'all' | 'fire+' | 'hot+'
+
 // Step 13.6 — depth filter mode persistence.
 const DEPTH_FILTER_STORAGE_KEY = 'settings:depthFilter'
 export type DepthFilterMode = 'strict' | 'tide_aware' | 'tag_only'
@@ -173,6 +194,13 @@ type BitePlanState = {
   /** Step 15: id of a waypoint the WaypointsList asked the map to fly to.
    *  MapView watches this, calls `map.flyTo(...)`, then clears it. */
   pendingFlyToWaypointId: string | null
+  /** Step 16: ad-hoc fly-to target from the TopZonesList (not a saved
+   *  waypoint). MapView watches this, calls flyTo, clears. */
+  pendingFlyToLatLon: LatLon | null
+
+  // Step 16 bottom-sheet state
+  sheetSnapPoint: SheetSnapPoint
+  tierFilter: TierFilter
 
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
@@ -206,6 +234,11 @@ type BitePlanState = {
   flyToWaypoint: (id: string) => void
   /** Cleared by MapView once it has consumed the fly-to. */
   clearPendingFlyTo: () => void
+  /** Step 16: ad-hoc fly-to from the TopZonesList. Selects a unit (so the
+   *  ZonePopup opens) AND queues the lat/lon for the map. */
+  flyToScoredUnit: (entry: ScoredEntry) => void
+  setSheetSnapPoint: (snap: SheetSnapPoint) => void
+  setTierFilter: (filter: TierFilter) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -353,6 +386,9 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   pendingRenameWaypointId: null,
   selectedWaypointId: null,
   pendingFlyToWaypointId: null,
+  pendingFlyToLatLon: null,
+  sheetSnapPoint: loadSheetSnap(),
+  tierFilter: 'all',
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -450,7 +486,19 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   selectWaypoint: (id) => set({ selectedWaypointId: id }),
   flyToWaypoint: (id) =>
     set({ pendingFlyToWaypointId: id, selectedWaypointId: id }),
-  clearPendingFlyTo: () => set({ pendingFlyToWaypointId: null }),
+  clearPendingFlyTo: () => set({ pendingFlyToWaypointId: null, pendingFlyToLatLon: null }),
+  flyToScoredUnit: (entry) => {
+    const [lon, lat] = entry.unit.centroid
+    set({
+      pendingFlyToLatLon: { lat, lon },
+      selectedZone: entry,
+    })
+  },
+  setSheetSnapPoint: (snap) => {
+    saveSheetSnap(snap)
+    set({ sheetSnapPoint: snap })
+  },
+  setTierFilter: (filter) => set({ tierFilter: filter }),
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

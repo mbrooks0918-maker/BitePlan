@@ -1,20 +1,19 @@
 /**
- * Trip Mode strip (Step 12).
+ * Trip Mode strip (Step 12 → embedded in BottomSheet at Step 16).
  *
  * When Trip Mode is active, the multi-day view swaps from the generic
  * "next 7 days from today" picker to a focused 12-card forecast covering
  * the Jun 1–12, 2026 Perdido Key kayak-fishing trip. Reuses the Step 11
- * DayPicker component verbatim — only the (startDate, dayCount) parameters
- * differ, plus an informational banner above the cards.
+ * DayPicker verbatim — only the (startDate, dayCount) parameters differ,
+ * plus an informational banner above the cards.
  *
- * TEMPORARY placement (Step 12) — Step 16's bottom sheet will host this.
+ * Step 16: removed the floating placement + the ModeToggle / TripToggle
+ * row (those moved into SheetContent and LayerToggles respectively).
  */
 
 import { useMemo } from 'react'
 import { Tent } from 'lucide-react'
 import DayPicker from '@/components/TimeStrip/DayPicker'
-import ModeToggle from '@/components/TimeStrip/ModeToggle'
-import TripToggle from './TripToggle'
 
 // Hardcoded per the handoff doc's "Trip Mode (locked behavior)" section.
 // 2026, month 5 = June (0-indexed); midnight local on June 1.
@@ -25,15 +24,7 @@ function TripStrip() {
   const startDate = useMemo(() => TRIP_START, [])
 
   return (
-    <div className="fixed bottom-3 inset-x-3 sm:inset-x-6 z-[1000] bg-slate-900/85 backdrop-blur-sm rounded-2xl shadow-xl px-4 pt-3 pb-3">
-      {/* Top row: mode + trip toggles (same layout as DayPickerStrip) */}
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <div className="flex items-center gap-2">
-          <ModeToggle />
-          <TripToggle />
-        </div>
-      </div>
-
+    <div className="relative w-full">
       {/* Trip Mode banner — informational, sits above the cards */}
       <div className="mb-2 flex items-center gap-2 rounded-lg bg-amber-500/15 ring-1 ring-amber-500/30 px-3 py-1.5">
         <Tent className="size-4 text-amber-400 shrink-0" />

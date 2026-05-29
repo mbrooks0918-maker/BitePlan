@@ -4,7 +4,6 @@ import 'leaflet/dist/leaflet.css'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
 import DepthContours from './DepthContours'
-import DevLayerPanel from './DevLayerPanel'
 import ScoredZones from './ScoredZones'
 import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
@@ -13,13 +12,8 @@ import AnchorPopup from './AnchorPopup'
 import SavedWaypoints from './SavedWaypoints'
 import SavedWaypointPopup from './SavedWaypointPopup'
 import SaveToast from '@/components/SaveWaypoint/SaveToast'
-import TideReadout from '@/components/BottomSheet/TideReadout'
-import WeatherReadout from '@/components/BottomSheet/WeatherReadout'
-import WaypointsList from '@/components/BottomSheet/WaypointsList'
-import TimeSlider from '@/components/TimeStrip/TimeSlider'
-import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
-import TripStrip from '@/components/Trip/TripStrip'
-import { isTripModeActive } from '@/store/useBitePlanStore'
+import BottomSheet from '@/components/BottomSheet/BottomSheet'
+import SheetContent from '@/components/BottomSheet/SheetContent'
 
 const ESRI_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -67,31 +61,29 @@ function InvalidateSizeOnMount() {
 }
 
 /**
- * Step 15 — saved-waypoint fly-to. The WaypointsList sets
- * `pendingFlyToWaypointId` in the store; this component lives inside
- * MapContainer so it has access to the Leaflet map instance, executes
- * the `flyTo`, then clears the pending id so the same waypoint can be
- * triggered again later. Fly-to duration is the Leaflet default (1.2s
- * approx); zoom 15 matches the spec.
+ * Saved-waypoint + top-zones fly-to (Step 15 + Step 16). Watches both the
+ * waypoint id and the ad-hoc lat/lon target the TopZonesList uses, calls
+ * `map.flyTo`, then clears the pending state so the same target can be
+ * triggered again later.
  */
-function WaypointFlyToSync() {
+function MapFlyToSync() {
   const pendingId = useBitePlanStore((s) => s.pendingFlyToWaypointId)
+  const pendingLatLon = useBitePlanStore((s) => s.pendingFlyToLatLon)
   const waypoints = useBitePlanStore((s) => s.waypoints)
   const clearPendingFlyTo = useBitePlanStore((s) => s.clearPendingFlyTo)
   const map = useMap()
   useEffect(() => {
-    if (!pendingId) return
-    const wp = waypoints.find((w) => w.id === pendingId)
-    if (!wp) {
+    if (pendingId) {
+      const wp = waypoints.find((w) => w.id === pendingId)
+      if (wp) map.flyTo([wp.lat, wp.lon], 15, { duration: 1.2 })
       clearPendingFlyTo()
       return
     }
-    map.flyTo([wp.lat, wp.lon], 15, { duration: 1.2 })
-    // Clear immediately — the popup is already open (the action set both
-    // pending + selected in one update), and we don't want a second
-    // setPending re-fire to no-op.
-    clearPendingFlyTo()
-  }, [pendingId, waypoints, clearPendingFlyTo, map])
+    if (pendingLatLon) {
+      map.flyTo([pendingLatLon.lat, pendingLatLon.lon], 15, { duration: 1.2 })
+      clearPendingFlyTo()
+    }
+  }, [pendingId, pendingLatLon, waypoints, clearPendingFlyTo, map])
   return null
 }
 
@@ -163,9 +155,6 @@ function MapStateSync() {
 function MapView() {
   const center = useBitePlanStore((s) => s.center)
   const zoom = useBitePlanStore((s) => s.zoom)
-  const timeMode = useBitePlanStore((s) => s.timeMode)
-  const tripOverride = useBitePlanStore((s) => s.tripModeOverride)
-  const tripActive = isTripModeActive(tripOverride)
 
   return (
     <>
@@ -193,25 +182,17 @@ function MapView() {
         <NamedAnchors />
         <SavedWaypoints />
         <MapStateSync />
-        <WaypointFlyToSync />
+        <MapFlyToSync />
         <InvalidateSizeOnMount />
       </MapContainer>
-      <TideReadout />
-      <WeatherReadout />
-      <DevLayerPanel />
       <ScoringStatus />
-      {timeMode === '24h' ? (
-        <TimeSlider />
-      ) : tripActive ? (
-        <TripStrip />
-      ) : (
-        <DayPickerStrip />
-      )}
+      <BottomSheet>
+        <SheetContent />
+      </BottomSheet>
       <ZonePopup />
       <AnchorPopup />
       <SavedWaypointPopup />
       <SaveToast />
-      <WaypointsList />
     </>
   )
 }

@@ -1,28 +1,18 @@
 /**
- * Wraps DayPicker in the same fixed-bottom strip chrome as TimeSlider so the
- * 24h / 7-day toggle swaps content cleanly. TEMPORARY placement (Step 11) —
- * Step 16's bottom sheet will host both modes.
+ * Wraps DayPicker for the 7-day mode. Embedded inside the BottomSheet's
+ * Half snap (Step 16). The mode toggle and Trip toggle now live in
+ * SheetContent / LayerToggles respectively.
  */
 
 import { useMemo } from 'react'
 import { startOfDay } from 'date-fns'
 import DayPicker from './DayPicker'
-import ModeToggle from './ModeToggle'
-import TripToggle from '@/components/Trip/TripToggle'
 
 function DayPickerStrip() {
   const startDate = useMemo(() => startOfDay(new Date()), [])
   return (
-    <div
-      // Mirrors TimeSlider's container so the visual position doesn't jump
-      // when the user toggles modes.
-      className="fixed bottom-3 inset-x-3 sm:inset-x-6 z-[1000] bg-slate-900/85 backdrop-blur-sm rounded-2xl shadow-xl px-4 pt-3 pb-3"
-    >
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <div className="flex items-center gap-2">
-          <ModeToggle />
-          <TripToggle />
-        </div>
+    <div className="relative w-full">
+      <div className="flex items-center justify-end mb-2">
         <div className="text-xs text-slate-400">Next 7 days</div>
       </div>
       <DayPicker startDate={startDate} dayCount={7} />
