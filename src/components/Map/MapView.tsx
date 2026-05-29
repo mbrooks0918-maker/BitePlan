@@ -91,6 +91,42 @@ function MapFlyToSync() {
   return null
 }
 
+/**
+ * Step 22 follow-up — tap-map-to-dismiss.
+ *
+ * Listens for Leaflet `click` events on the map background. When the user
+ * taps bare water (i.e. NOT a scored zone, anchor pin, saved waypoint, or
+ * GPS dot — those are interactive layers that intercept the event before
+ * it reaches the map), we collapse the bottom sheet back to its `'handle'`
+ * snap so the map is the dominant surface.
+ *
+ * Behavior nuances:
+ *   - Skip if the sheet is already at `'handle'` (nothing to do).
+ *   - Skip if a ZonePopup / AnchorPopup / SavedWaypointPopup is open. Those
+ *     are React overlays rendered above the map at z-1100; their backdrop
+ *     swallows clicks, so Leaflet's `click` event wouldn't fire anyway —
+ *     this guard is belt-and-braces for the cases where a popup is mounted
+ *     but transitioning out.
+ *   - Skip when in On-Water Mode (the sheet is already translated off-
+ *     screen; reasserting `'handle'` would be a no-op storage write).
+ *
+ * Interactive layers (CircleMarker, Marker) automatically swallow click
+ * events before they reach the map per Leaflet's default event model, so
+ * we don't need a `e.originalEvent.target` check.
+ */
+function MapTapDismiss() {
+  useMapEvents({
+    click() {
+      const s = useBitePlanStore.getState()
+      if (s.onWaterMode) return
+      if (s.selectedZone || s.selectedAnchor || s.selectedWaypointId) return
+      if (s.sheetSnapPoint === 'handle') return
+      s.setSheetSnapPoint('handle')
+    },
+  })
+  return null
+}
+
 function MapStateSync() {
   const setCenter = useBitePlanStore((s) => s.setCenter)
   const setZoom = useBitePlanStore((s) => s.setZoom)
@@ -187,6 +223,7 @@ function MapView() {
         <SavedWaypoints />
         <UserLocation />
         <MapStateSync />
+        <MapTapDismiss />
         <MapFlyToSync />
         <InvalidateSizeOnMount />
         <LocateButton />

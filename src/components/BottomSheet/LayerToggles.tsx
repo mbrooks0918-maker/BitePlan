@@ -26,7 +26,10 @@ import {
 type LayerRow = { key: HabitatKey; label: string; swatch: string }
 const LAYERS: LayerRow[] = [
   { key: 'seagrass', label: 'Seagrass',       swatch: '#14b8a6' },
-  { key: 'oysters',  label: 'Oysters',        swatch: '#f59e0b' },
+  // Step 22 follow-up: purple swatch matches the new oyster polygon color
+  // in HabitatLayers — chosen to break the amber/orange visual collision
+  // with HOT-tier scored zones.
+  { key: 'oysters',  label: 'Oysters',        swatch: '#a855f7' },
   { key: 'wetlands', label: 'Wetlands',       swatch: '#84cc16' },
   { key: 'contours', label: 'Depth contours', swatch: '#60a5fa' },
 ]

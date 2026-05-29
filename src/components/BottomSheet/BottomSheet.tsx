@@ -1,21 +1,27 @@
 /**
- * Bottom sheet (Step 16) — the proper 3-snap-point mobile UI.
+ * Bottom sheet (Step 16 + Step 22 follow-up) — 4-snap-point mobile UI.
  *
- * Replaces the floating panels from Steps 5–15. Three snap points per the
- * handoff doc:
+ * Replaces the floating panels from Steps 5–15. Four snap points:
  *
- *   Peek (10vh): tide pill + conditions score + time indicator — always
- *                visible.
- *   Half (50vh): default open. Time strip, top zones list, tier + species
- *                filters.
- *   Full (90vh): swipe up. Layer toggles, depth filter, Trip toggle,
- *                saved waypoints list, settings stub.
+ *   Handle (~36px / ~4.5vh on a typical phone): DEFAULT. Just the drag pill
+ *                + a few px of slate background. Map dominates the screen.
+ *   Peek (10vh): tide pill + conditions score + time indicator. Secondary
+ *                state reachable by drag — not the default any more.
+ *   Half (50vh): time strip, top zones list, tier + species filters.
+ *   Full (90vh): layer toggles, depth filter, Trip toggle, saved
+ *                waypoints list, settings stub.
  *
  * Gesture model: drag the handle (or anywhere on the header strip) with a
  * pointer. While dragging, the sheet height tracks the pointer. On release
  * we snap to the nearest snap point, with a velocity-aware bypass — a fast
- * upward flick from Peek lands on Full directly. Snap is persisted to
+ * upward flick from Handle can land on Full directly. Snap is persisted to
  * `settings:sheetSnap` so the next load reopens at the same height.
+ *
+ * Tap-to-dismiss: in MapView.tsx, a Leaflet `click` event on bare map (not
+ * a scored zone, anchor pin, waypoint, GPS dot, or the sheet) snaps the
+ * sheet back to `'handle'`. Tapping the handle row when collapsed expands
+ * to Half. Together this gives a "panel comes and goes with your taps"
+ * feel without ever obstructing the map permanently.
  *
  * Implementation notes:
  *   - Height-based animation via CSS transitions on the container. React
@@ -24,6 +30,9 @@
  *   - Full-snap-only sections render lazily via `everOpenedFull` — once the
  *     user has reached Full, those components remain mounted so a second
  *     trip to Full feels instant.
+ *   - At the Handle snap the children scroll-area is height-clipped to 0
+ *     by the container, so we don't bother conditionally unmounting the
+ *     children — the transition simply reveals them as the sheet grows.
  *   - z-30 sits above the map but below the popups (popup layer uses
  *     z-1100+ to overlay the sheet).
  */
@@ -31,13 +40,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { GripHorizontal } from 'lucide-react'
 import { useBitePlanStore, type SheetSnapPoint } from '@/store/useBitePlanStore'
 
-// Snap heights in vh.
-const SNAP_HEIGHTS: Record<SheetSnapPoint, number> = {
+// Snap heights in vh. Handle is a hardcoded pixel value translated to vh on
+// the fly — see resolvedHandleVh — so the thin tab is the same physical size
+// across phones regardless of screen height.
+const HANDLE_PX = 36
+const SNAP_HEIGHTS: Record<Exclude<SheetSnapPoint, 'handle'>, number> = {
   peek: 10,
   half: 50,
   full: 90,
 }
-const SNAP_ORDER: SheetSnapPoint[] = ['peek', 'half', 'full']
+const SNAP_ORDER: SheetSnapPoint[] = ['handle', 'peek', 'half', 'full']
 // Velocity threshold for a flick that bypasses the nearest snap. Tuned by
 // feel — slower than this and we just nearest-snap; faster and we commit
 // to the next snap in the swipe direction.
@@ -69,11 +81,23 @@ function BottomSheet({ children }: Props) {
   const lastMoveY = useRef<number>(0)
   const lastMoveTime = useRef<number>(0)
 
-  // Convert px → vh and clamp into the [peek, full] range so the gesture
+  // Resolve Handle's px height into vh for the duration of this render.
+  // Window height can change (rotation, mobile address bar) so we compute
+  // it inline rather than caching. Defensive fallback prevents divide-by-
+  // zero in unusual SSR-like contexts.
+  const winH = typeof window !== 'undefined' ? window.innerHeight : 800
+  const resolvedHandleVh = (HANDLE_PX / Math.max(1, winH)) * 100
+
+  /** Height in vh for a given snap. Handle resolves dynamically; the rest
+   *  are constants. */
+  const heightForSnap = (s: SheetSnapPoint): number =>
+    s === 'handle' ? resolvedHandleVh : SNAP_HEIGHTS[s]
+
+  // Convert px → vh and clamp into the [handle, full] range so the gesture
   // can't pull the sheet outside its design envelope.
   const pxToVh = (px: number) => (px / window.innerHeight) * 100
   const clampVh = (vh: number) =>
-    Math.max(SNAP_HEIGHTS.peek, Math.min(SNAP_HEIGHTS.full, vh))
+    Math.max(resolvedHandleVh, Math.min(SNAP_HEIGHTS.full, vh))
 
   // Apply a height directly to the element during drag — bypasses React
   // for the smoothest animation. Also disables the CSS transition for the
@@ -107,7 +131,7 @@ function BottomSheet({ children }: Props) {
     target.setPointerCapture(e.pointerId)
     dragStartY.current = e.clientY
     dragStartTime.current = performance.now()
-    dragStartHeightVh.current = SNAP_HEIGHTS[snap]
+    dragStartHeightVh.current = heightForSnap(snap)
     lastMoveY.current = e.clientY
     lastMoveTime.current = dragStartTime.current
     setGrabbing(true)
@@ -141,38 +165,43 @@ function BottomSheet({ children }: Props) {
     const velocity = recentDy / recentDt // px / ms (positive = downward)
 
     // Decide the target snap. Default = nearest by absolute height.
-    let target: SheetSnapPoint = nearestSnap(releaseHeightVh)
+    let target: SheetSnapPoint = nearestSnap(releaseHeightVh, resolvedHandleVh)
     if (Math.abs(velocity) >= VELOCITY_FLICK_PX_MS) {
       // Flick — move at least one snap in the gesture direction.
       const currentIdx = SNAP_ORDER.indexOf(snap)
       const dir = velocity < 0 ? +1 : -1 // upward swipe → bigger snap
       const idx = Math.max(0, Math.min(SNAP_ORDER.length - 1, currentIdx + dir))
       target = SNAP_ORDER[idx]
-      // For a strong flick we can skip a step — e.g. peek → full.
+      // Strong flick can skip steps — e.g. handle → full or full → handle.
       if (Math.abs(velocity) >= VELOCITY_FLICK_PX_MS * 1.7) {
-        target = dir > 0 ? 'full' : 'peek'
+        target = dir > 0 ? 'full' : 'handle'
       }
     }
     commitSnap(target)
   }
 
-  // Tapping (no drag) on the header collapses to / expands from Peek per
-  // the spec: tap on the peek strip expands to Half. We detect "tap" as
-  // negligible movement + short duration.
+  // Tapping (no drag) on the header expands a collapsed sheet. From either
+  // Handle or Peek a tap goes to Half (the user clearly wants to see
+  // something). We detect "tap" as negligible movement + short duration,
+  // which is implicit here because onClick only fires when no drag-cancel
+  // happened.
   const onHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
     // If the click bubbled up from an actionable child, don't toggle.
     if ((e.target as HTMLElement).closest('button, a, input, [role="button"]')) return
-    if (snap === 'peek') {
+    if (snap === 'handle' || snap === 'peek') {
       commitSnap('half')
     }
   }
 
-  // Keyboard accessibility per spec: Escape collapses; arrow keys cycle.
+  // Keyboard accessibility per spec: Escape steps down through the snap
+  // order (Full → Half → Peek → Handle), then no-ops at Handle. Alt+Arrow
+  // continues to cycle through the full snap order in either direction.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        commitSnap(snap === 'full' ? 'half' : 'peek')
+        const idx = SNAP_ORDER.indexOf(snap)
+        if (idx > 0) commitSnap(SNAP_ORDER[idx - 1])
       } else if (e.key === 'ArrowUp' && e.altKey) {
         // Alt+ArrowUp moves up one snap (don't hijack default Up).
         e.preventDefault()
@@ -192,7 +221,7 @@ function BottomSheet({ children }: Props) {
     <aside
       ref={sheetRef}
       aria-label="Bottom sheet"
-      aria-expanded={snap !== 'peek'}
+      aria-expanded={snap !== 'handle'}
       data-snap={snap}
       // Centered + max-width on tablet+; full-width on mobile per spec.
       // touch-action: none so the browser doesn't fight our pointer drag.
@@ -207,7 +236,7 @@ function BottomSheet({ children }: Props) {
         'flex flex-col'
       }
       style={{
-        height: `${SNAP_HEIGHTS[snap]}vh`,
+        height: snap === 'handle' ? `${HANDLE_PX}px` : `${SNAP_HEIGHTS[snap]}vh`,
         // On-Water Mode: slide off-screen + fade. Pointer events off so
         // taps go through to the map below.
         transform: onWater ? 'translateY(100%)' : undefined,
@@ -267,12 +296,14 @@ function BottomSheet({ children }: Props) {
   )
 }
 
-/** Pick the closest of the three snap heights to `vh`. */
-function nearestSnap(vh: number): SheetSnapPoint {
+/** Pick the closest of the four snap heights to `vh`. Handle's vh height
+ *  is dynamic (depends on viewport height) so it's passed in. */
+function nearestSnap(vh: number, handleVh: number): SheetSnapPoint {
   let best: SheetSnapPoint = 'half'
   let bestDist = Infinity
   for (const s of SNAP_ORDER) {
-    const d = Math.abs(vh - SNAP_HEIGHTS[s])
+    const target = s === 'handle' ? handleVh : SNAP_HEIGHTS[s]
+    const d = Math.abs(vh - target)
     if (d < bestDist) {
       bestDist = d
       best = s

@@ -11,9 +11,17 @@ import { useBitePlanStore } from '@/store/useBitePlanStore'
 type HabitatPolyKey = 'seagrass' | 'oysters' | 'wetlands'
 
 // Style spec per handoff doc — "UI: tier-color heat zones" → "Habitat layer toggles".
+//
+// Step 22 follow-up: oysters recoloured from amber #f59e0b → purple #a855f7
+// to break the visual collision with HOT-tier scored dots (which are
+// #f97316 orange). Amber-on-orange was reading as "is this a hot zone or
+// an oyster bed?" during user testing of the deployed build. Purple is
+// distinct from every other map color (cyan seagrass, lime wetlands,
+// orange/red tiers, blue GPS, cyan AMRD anchors) so the eye can sort it
+// cleanly.
 const LAYER_STYLE: Record<HabitatPolyKey, PathOptions> = {
   seagrass: { color: '#14b8a6', weight: 1, fillColor: '#14b8a6', fillOpacity: 0.30 },
-  oysters:  { color: '#f59e0b', weight: 1, fillColor: '#f59e0b', fillOpacity: 0.40 },
+  oysters:  { color: '#a855f7', weight: 1, fillColor: '#a855f7', fillOpacity: 0.35 },
   wetlands: { color: '#84cc16', weight: 1, fillColor: '#84cc16', fillOpacity: 0.25 },
 }
 

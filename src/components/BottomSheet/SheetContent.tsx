@@ -115,6 +115,11 @@ function SettingsSection() {
       <div className="mt-3">
         <InstallAppButton />
       </div>
+      {/* Step 22 follow-up — tip for the new handle-default sheet UX so
+          the user discovers the tap-map-to-dismiss gesture. */}
+      <p className="mt-3 px-1 text-xs italic text-slate-400 leading-snug">
+        Tip: Tap the map to hide the panel. Drag the handle up to bring it back.
+      </p>
     </section>
   )
 }

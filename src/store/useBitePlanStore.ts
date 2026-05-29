@@ -54,14 +54,21 @@ const TRIP_STORAGE_KEY = 'trip:active' // per handoff doc storage keys
 
 // Step 16 — bottom-sheet snap-point persistence so the user's preferred
 // sheet position survives reload.
+//
+// Step 22 follow-up: added `'handle'` (a ~36px thin tab) as the NEW DEFAULT
+// snap point. Fresh installs open with only the drag handle visible so the
+// map dominates the screen. `'peek'` remains as a secondary state reachable
+// by dragging — it's no longer the auto-default. Existing users with a
+// stored 'peek' / 'half' / 'full' keep their preference; only new visitors
+// (and post-reset users) land on 'handle'.
 const SHEET_SNAP_STORAGE_KEY = 'settings:sheetSnap'
-export type SheetSnapPoint = 'peek' | 'half' | 'full'
+export type SheetSnapPoint = 'handle' | 'peek' | 'half' | 'full'
 function loadSheetSnap(): SheetSnapPoint {
   try {
     const raw = window.localStorage.getItem(SHEET_SNAP_STORAGE_KEY)
-    if (raw === 'peek' || raw === 'half' || raw === 'full') return raw
+    if (raw === 'handle' || raw === 'peek' || raw === 'half' || raw === 'full') return raw
   } catch {}
-  return 'half'
+  return 'handle'
 }
 function saveSheetSnap(s: SheetSnapPoint): void {
   try {
