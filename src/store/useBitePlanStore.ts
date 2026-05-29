@@ -170,6 +170,9 @@ type BitePlanState = {
   pendingRenameWaypointId: string | null
   /** Waypoint shown in the saved-waypoint popup when a map pin is tapped. */
   selectedWaypointId: string | null
+  /** Step 15: id of a waypoint the WaypointsList asked the map to fly to.
+   *  MapView watches this, calls `map.flyTo(...)`, then clears it. */
+  pendingFlyToWaypointId: string | null
 
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
@@ -197,6 +200,12 @@ type BitePlanState = {
    *  or when the rename inline closes. */
   clearPendingRename: () => void
   selectWaypoint: (id: string | null) => void
+  /** Step 15: ask the map to fly to a saved waypoint and open its popup.
+   *  Sets `pendingFlyToWaypointId` AND `selectedWaypointId` in one update so
+   *  the popup is already ready by the time the fly-to settles. */
+  flyToWaypoint: (id: string) => void
+  /** Cleared by MapView once it has consumed the fly-to. */
+  clearPendingFlyTo: () => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -343,6 +352,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   waypoints: listAllWaypoints(),
   pendingRenameWaypointId: null,
   selectedWaypointId: null,
+  pendingFlyToWaypointId: null,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -438,6 +448,9 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
 
   clearPendingRename: () => set({ pendingRenameWaypointId: null }),
   selectWaypoint: (id) => set({ selectedWaypointId: id }),
+  flyToWaypoint: (id) =>
+    set({ pendingFlyToWaypointId: id, selectedWaypointId: id }),
+  clearPendingFlyTo: () => set({ pendingFlyToWaypointId: null }),
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

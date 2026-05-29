@@ -15,6 +15,7 @@ import SavedWaypointPopup from './SavedWaypointPopup'
 import SaveToast from '@/components/SaveWaypoint/SaveToast'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 import WeatherReadout from '@/components/BottomSheet/WeatherReadout'
+import WaypointsList from '@/components/BottomSheet/WaypointsList'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
 import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
 import TripStrip from '@/components/Trip/TripStrip'
@@ -62,6 +63,35 @@ function InvalidateSizeOnMount() {
       ro.disconnect()
     }
   }, [map])
+  return null
+}
+
+/**
+ * Step 15 — saved-waypoint fly-to. The WaypointsList sets
+ * `pendingFlyToWaypointId` in the store; this component lives inside
+ * MapContainer so it has access to the Leaflet map instance, executes
+ * the `flyTo`, then clears the pending id so the same waypoint can be
+ * triggered again later. Fly-to duration is the Leaflet default (1.2s
+ * approx); zoom 15 matches the spec.
+ */
+function WaypointFlyToSync() {
+  const pendingId = useBitePlanStore((s) => s.pendingFlyToWaypointId)
+  const waypoints = useBitePlanStore((s) => s.waypoints)
+  const clearPendingFlyTo = useBitePlanStore((s) => s.clearPendingFlyTo)
+  const map = useMap()
+  useEffect(() => {
+    if (!pendingId) return
+    const wp = waypoints.find((w) => w.id === pendingId)
+    if (!wp) {
+      clearPendingFlyTo()
+      return
+    }
+    map.flyTo([wp.lat, wp.lon], 15, { duration: 1.2 })
+    // Clear immediately — the popup is already open (the action set both
+    // pending + selected in one update), and we don't want a second
+    // setPending re-fire to no-op.
+    clearPendingFlyTo()
+  }, [pendingId, waypoints, clearPendingFlyTo, map])
   return null
 }
 
@@ -163,6 +193,7 @@ function MapView() {
         <NamedAnchors />
         <SavedWaypoints />
         <MapStateSync />
+        <WaypointFlyToSync />
         <InvalidateSizeOnMount />
       </MapContainer>
       <TideReadout />
@@ -180,6 +211,7 @@ function MapView() {
       <AnchorPopup />
       <SavedWaypointPopup />
       <SaveToast />
+      <WaypointsList />
     </>
   )
 }
