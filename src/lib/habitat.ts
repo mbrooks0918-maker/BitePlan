@@ -22,6 +22,7 @@ import type {
 } from 'geojson'
 import type { Bounds, ConvergenceTag, HabitatFeature, HabitatType, ScoringUnit } from '@/types'
 import { buildConvergenceContext, type ConvergenceContext } from '@/lib/convergence'
+import { getDepthAtMLLW, isDepthGridReady } from '@/lib/depth'
 
 const SOURCES: Array<{ url: string; type: HabitatType }> = [
   { url: '/data/seagrass.geojson', type: 'seagrass' },
@@ -182,8 +183,30 @@ function habitatTreeQuery(
   return Array.from(types)
 }
 
+/**
+ * Step 13.6 post-launch tuning: suppress convergence tags on units whose
+ * centroid sits above MLLW (i.e. dry / intertidal mudflat at low tide). A
+ * creek mouth on a dry mudflat isn't a fishable creek mouth; a transition
+ * between two dry edges isn't a fishable transition. Skipping the tag
+ * means these units also can't unlock the scoring gate downstream, which
+ * is the correct behavior across all depth-filter modes.
+ *
+ * The worker's init handler awaits both habitat + depth grid loads before
+ * publishing init-complete, so by the first `deriveScoringUnits` call the
+ * depth grid is guaranteed loaded. If for any reason it isn't (e.g. a fetch
+ * failure left the grid empty), the check degrades to a no-op — tags are
+ * returned as-is, same behavior as Step 13.6's first commit.
+ */
 function tagsFor(centroid: [number, number], habitatType: HabitatType): ConvergenceTag[] {
   if (!convergenceCtx) return []
+  if (isDepthGridReady()) {
+    const [lon, lat] = centroid
+    const mllw = getDepthAtMLLW(lat, lon)
+    // mllw < 0 means the cell sits above MLLW (above-water at typical low
+    // tide). Out-of-coverage (mllw == null) is treated as "may be fishable"
+    // and tags are returned normally.
+    if (mllw != null && mllw < 0) return []
+  }
   return convergenceCtx.tagUnit(centroid, habitatType, habitatTreeQuery)
 }
 

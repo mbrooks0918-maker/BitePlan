@@ -106,18 +106,19 @@ const DEPTH_SHALLOW_FT = 2          // kayak navigability cutoff
 const DEPTH_DEEP_FT = 30            // popup-only note threshold ("deep water")
 // Initial spec said 30 m / 3 ft. The depth grid resolution is 500 m, so a
 // 30 m sample step almost always reads the SAME cell, defeating the
-// detection. The audit-band thresholds (3 / 5 / 10 ft) were also tuned for
-// real 30 m bathymetry. At our 500 m grid resolution we ratchet the
-// offset up to 100 m (one neighbouring cell) and the minimum gradient to
-// 5 ft so only true "strong" channel-edge breaks survive. Step 20 perf
-// pass can revisit if a higher-res grid lands.
+// detection. The audit-band thresholds (3 / 5 / 10 ft) were also tuned
+// for real 30 m bathymetry. At our 500 m grid resolution, cell-neighbor
+// gradients of 5+ ft are mostly shoreline-vs-bay artifacts, not true
+// channel edges. Step 13.6 post-launch tuning raises the bar:
+//   - sample offset: 100 m (one neighbouring grid cell)
+//   - min gradient:  8 ft  (real drop-offs anglers fish)
+//   - bands: 8-12 moderate, 12-18 strong, >18 strong+ (channel edge)
+//   - SHALLOWER side must be ≥ 2 ft MLLW (real flat, not mudflat shoreline)
+//   - CENTROID must be ≥ 1 ft MLLW (in fishable water)
 const DEPTH_BREAK_OFFSET_M = 100
-const DEPTH_BREAK_MIN_DIFF_FT = 5
-// A depth_break should anchor a fish-holding spot — the centroid itself
-// must be in fishable water at MLLW (>1 ft). Without this gate, dry-at-low
-// wetland edges adjacent to a deeper bay get tagged as "channel edges"
-// they're not.
+const DEPTH_BREAK_MIN_DIFF_FT = 8
 const DEPTH_BREAK_MIN_CENTER_FT = 1
+const DEPTH_BREAK_MIN_SHALLOW_SIDE_FT = 2
 
 type InitMessage = { type: 'init'; reqId: number }
 type ScoreMessage = {
@@ -321,8 +322,13 @@ function evaluateDepthForUnit(
     // out of kayak-fishable range at MLLW.
     const a = Math.min(grad.centerDepth, otherDepth)
     const b = Math.max(grad.centerDepth, otherDepth)
-    if (a >= DEPTH_BREAK_MIN_CENTER_FT) {
-      const strength: 'moderate' | 'strong' = grad.maxDiff > 10 ? 'strong' : 'strong'
+    // Shallow-side gate: drop-offs from actual flats into channels, NOT
+    // mudflat shoreline transitions. (Centroid gate already enforced above.)
+    if (a >= DEPTH_BREAK_MIN_SHALLOW_SIDE_FT) {
+      const strength: 'moderate' | 'strong' =
+        grad.maxDiff >= 18 ? 'strong' :
+        grad.maxDiff >= 12 ? 'strong' :
+        'moderate'
       depthBreakTag = {
         type: 'depth_break',
         strength,
