@@ -20,7 +20,7 @@ import { format } from 'date-fns'
 import { Check, KeyRound, Lock, Navigation, X as XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { ScoringContext, ScoringFactor, Tier } from '@/types'
-import { useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
+import { deriveCurrentEnv, useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
 import { getCachedProjection, type ProjectionResult } from '@/lib/projection'
@@ -138,6 +138,7 @@ function ZonePopup() {
     const { sunrise, sunset } = getSunTimes(currentTime, currentStation.lat, currentStation.lon)
     const dailyTideRangeFt = dailyTideRange(tidePredictions, currentTime)
 
+    const env = deriveCurrentEnv(currentWeather, currentTime)
     const ctx: ScoringContext = {
       time: currentTime,
       tideState,
@@ -150,6 +151,10 @@ function ZonePopup() {
       dailyTideRangeFt,
       month: currentTime.getMonth() + 1,
       hour: currentTime.getHours(),
+      waterTempF: env.waterTempF,
+      pressureInHg: env.pressureInHg,
+      pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
+      frontalPhase: env.frontalPhase,
     }
 
     getCachedProjection(selectedZone.unit, ctx, currentStation)

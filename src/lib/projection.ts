@@ -17,8 +17,13 @@ import {
   getCurrentTideState,
   type TidePrediction,
 } from '@/lib/tides'
-import { hourlyAt } from '@/lib/weather'
-import { useBitePlanStore } from '@/store/useBitePlanStore'
+import {
+  frontalPhaseAt,
+  hourlyAt,
+  pressureAt,
+  pressureTrendInHgPer3hAt,
+} from '@/lib/weather'
+import { estimateWaterTempF, useBitePlanStore } from '@/store/useBitePlanStore'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { scoreUnit } from '@/lib/scoring'
 import type { Station } from '@/lib/stations'
@@ -168,13 +173,31 @@ export async function projectNextFireWindow(
     const { state: tideState } = getCurrentTideState(allEvents, windowTime)
     const { sunrise, sunset } = getSunTimes(windowTime, station.lat, station.lon)
 
-    // Per-window wind from the NWS hourly forecast where it exists. Beyond
-    // the forecast's ~7-day horizon, fall back to the current observed wind
-    // (carry-forward approximation — same model the worker uses).
+    // Per-window env from the NWS hourly + pressure forecasts where they
+    // exist. Beyond the forecast's ~7-day horizon, fall back to the current
+    // context's values (carry-forward approximation — same model the worker
+    // uses). All Step 13.5 audit fields (water temp, pressure, frontal phase)
+    // participate here so the next-fire projection reflects how the env is
+    // actually moving across the 7-day horizon.
     const weather = useBitePlanStore.getState().currentWeather
-    const matchedHourly = weather ? hourlyAt(weather, windowTime.getTime()) : null
+    const tMs = windowTime.getTime()
+    const matchedHourly = weather ? hourlyAt(weather, tMs) : null
     const windKt = matchedHourly?.windSpeedKt ?? currentCtx.windSpeedKt
     const windDir = matchedHourly?.windDirectionCompass ?? currentCtx.windDirectionCompass
+
+    const month = windowTime.getMonth() + 1
+    const airTempF = matchedHourly?.temperatureF ?? 0
+    const waterTempF = airTempF > 0
+      ? estimateWaterTempF(airTempF, month)
+      : currentCtx.waterTempF
+    const pNow = weather ? pressureAt(weather, tMs) : null
+    const pressureInHg = pNow ?? currentCtx.pressureInHg
+    const pressureTrendInHgPer3h = weather
+      ? pressureTrendInHgPer3hAt(weather, tMs)
+      : currentCtx.pressureTrendInHgPer3h
+    const frontalPhase = weather
+      ? frontalPhaseAt(weather, tMs)
+      : currentCtx.frontalPhase
 
     const ctx: ScoringContext = {
       time: windowTime,
@@ -186,8 +209,12 @@ export async function projectNextFireWindow(
       windSpeedKt: windKt,
       windDirectionCompass: windDir,
       dailyTideRangeFt: dailyTideRange(allEvents, windowTime),
-      month: windowTime.getMonth() + 1,
+      month,
       hour: windowTime.getHours(),
+      waterTempF,
+      pressureInHg,
+      pressureTrendInHgPer3h,
+      frontalPhase,
     }
 
     const result = scoreUnit(unit, ctx)

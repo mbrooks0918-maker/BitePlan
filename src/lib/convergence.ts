@@ -69,6 +69,37 @@ const CREEK_STRONG_M = 6
 // the check would false-negative legitimate transitions.)
 const TRANSITION_RADIUS_M = 8
 
+// --- Chokepoint (Step 13.5) ----------------------------------------------
+//
+// Tidal pinch < 300 m wide between two larger water bodies. Detecting this
+// from the habitat polygons alone is unreliable (we have no land mask, only
+// shoreline-adjacent habitat). For the Phase 1 coverage area we hardcode
+// the five known Gulf inshore passes documented in the audit memo; any
+// scoring unit whose centroid lands within CHOKEPOINT_TAG_RADIUS_M of one
+// gets a chokepoint convergence tag.
+//
+// Coordinates are public-knowledge nautical chart references; widths are
+// approximate (Gulf passes shift season to season as sand bars migrate).
+const CHOKEPOINT_TAG_RADIUS_M = 500
+type KnownChokepoint = { name: string; lat: number; lon: number; widthM: number }
+const KNOWN_CHOKEPOINTS: KnownChokepoint[] = [
+  { name: 'Perdido Pass',       lat: 30.272, lon: -87.553, widthM: 200 },
+  { name: 'Pensacola Pass',     lat: 30.323, lon: -87.293, widthM: 300 },
+  { name: 'East Pass (Destin)', lat: 30.387, lon: -86.518, widthM: 200 },
+  { name: 'St. Andrew Pass',    lat: 30.124, lon: -85.730, widthM: 200 },
+  { name: 'Bob Sikes Cut',      lat: 29.717, lon: -84.872, widthM: 100 },
+]
+
+// --- Confluence (Step 13.5) ----------------------------------------------
+//
+// Two or more creek/drainage mouths within CONFLUENCE_PAIR_M of each other.
+// Stronger than a single mouth (audit: "where two creek/drainage mouths meet
+// open water within close proximity (~100 m)"). The midpoint is the tag
+// location; any unit within CONFLUENCE_TAG_RADIUS_M of that midpoint
+// inherits the tag.
+const CONFLUENCE_PAIR_M = 100
+const CONFLUENCE_TAG_RADIUS_M = 150
+
 // ---- conversions ---------------------------------------------------------
 
 const DEG_PER_M_LAT = 1 / 111_000
@@ -94,9 +125,13 @@ function haversineMeters(a: [number, number], b: [number, number]): number {
 
 type DetectedPoint = { lon: number; lat: number; strength: 'weak' | 'moderate' | 'strong'; habitatType: HabitatType }
 type DetectedMouth = { lon: number; lat: number; strength: 'weak' | 'moderate' | 'strong'; widthM: number }
+type DetectedChokepoint = { lon: number; lat: number; name: string; widthM: number }
+type DetectedConfluence = { lon: number; lat: number; mouthCount: number }
 
 type IndexedPoint = { minX: number; minY: number; maxX: number; maxY: number; tag: DetectedPoint }
 type IndexedMouth = { minX: number; minY: number; maxX: number; maxY: number; tag: DetectedMouth }
+type IndexedChokepoint = { minX: number; minY: number; maxX: number; maxY: number; tag: DetectedChokepoint }
+type IndexedConfluence = { minX: number; minY: number; maxX: number; maxY: number; tag: DetectedConfluence }
 
 // ---- detection helpers ---------------------------------------------------
 
@@ -287,6 +322,8 @@ export type HabitatTreeQuery = (
 export type ConvergenceContext = {
   pointStats: { features: number; tags: number }
   mouthStats: { features: number; tags: number }
+  chokepointStats: { tags: number }
+  confluenceStats: { tags: number }
   tagUnit: (
     centroid: [number, number],
     habitatType: HabitatType,
@@ -297,11 +334,19 @@ export type ConvergenceContext = {
 export function buildConvergenceContext(features: HabitatFeature[]): ConvergenceContext {
   const pointTree = new RBush<IndexedPoint>()
   const mouthTree = new RBush<IndexedMouth>()
+  const chokepointTree = new RBush<IndexedChokepoint>()
+  const confluenceTree = new RBush<IndexedConfluence>()
 
   let pointCount = 0
   let pointFeatures = 0
   let mouthCount = 0
   let mouthFeatures = 0
+  let chokepointCount = 0
+  let confluenceCount = 0
+
+  // Collect every detected mouth (with its location) so we can do a pairwise
+  // proximity scan below to derive confluence tags.
+  const allMouths: DetectedMouth[] = []
 
   for (const f of features) {
     let foundPoint = false
@@ -331,11 +376,58 @@ export function buildConvergenceContext(features: HabitatFeature[]): Convergence
             tag: m,
           })
           mouthCount++
+          allMouths.push(m)
         }
       }
     })
     if (foundPoint) pointFeatures++
     if (foundMouth) mouthFeatures++
+  }
+
+  // --- Confluence pass ---------------------------------------------------
+  //
+  // O(n²) over detected mouths is cheap (mouths are sparse — typically dozens
+  // per Phase 1 area). Pair every mouth with every later mouth and emit a
+  // confluence tag at the midpoint when they're within CONFLUENCE_PAIR_M.
+  // A "cluster" of 3+ mouths produces 3 pair-midpoints that share a tag tree
+  // — the rendered popup just shows whichever lands within the unit's
+  // search radius.
+  for (let i = 0; i < allMouths.length; i++) {
+    for (let j = i + 1; j < allMouths.length; j++) {
+      const a = allMouths[i]
+      const b = allMouths[j]
+      const d = haversineMeters([a.lon, a.lat], [b.lon, b.lat])
+      if (d > CONFLUENCE_PAIR_M) continue
+      const conf: DetectedConfluence = {
+        lon: (a.lon + b.lon) / 2,
+        lat: (a.lat + b.lat) / 2,
+        mouthCount: 2, // we only know about this pair locally
+      }
+      const dLat = CONFLUENCE_TAG_RADIUS_M * DEG_PER_M_LAT
+      const dLon = CONFLUENCE_TAG_RADIUS_M * degPerMeterLon(conf.lat)
+      confluenceTree.insert({
+        minX: conf.lon - dLon, maxX: conf.lon + dLon,
+        minY: conf.lat - dLat, maxY: conf.lat + dLat,
+        tag: conf,
+      })
+      confluenceCount++
+    }
+  }
+
+  // --- Chokepoint pass ---------------------------------------------------
+  //
+  // Hardcoded for Phase 1 (see KNOWN_CHOKEPOINTS comment above). Each known
+  // pass gets one tag in the rbush; units within CHOKEPOINT_TAG_RADIUS_M
+  // pick it up at derive time.
+  for (const cp of KNOWN_CHOKEPOINTS) {
+    const dLat = CHOKEPOINT_TAG_RADIUS_M * DEG_PER_M_LAT
+    const dLon = CHOKEPOINT_TAG_RADIUS_M * degPerMeterLon(cp.lat)
+    chokepointTree.insert({
+      minX: cp.lon - dLon, maxX: cp.lon + dLon,
+      minY: cp.lat - dLat, maxY: cp.lat + dLat,
+      tag: { lon: cp.lon, lat: cp.lat, name: cp.name, widthM: cp.widthM },
+    })
+    chokepointCount++
   }
 
   function tagUnit(
@@ -390,12 +482,41 @@ export function buildConvergenceContext(features: HabitatFeature[]): Convergence
       })
     }
 
+    // Chokepoint hits (Step 13.5) — any unit within ~500 m of a known pass.
+    // Documented as flounder-stacking spots and bull-redfish run paths.
+    const cpHits = chokepointTree.search({
+      minX: lon, maxX: lon, minY: lat, maxY: lat,
+    })
+    for (const h of cpHits) {
+      const t = h.tag
+      tags.push({
+        type: 'chokepoint',
+        strength: 'strong',
+        description: `${t.name} chokepoint (${t.widthM} m wide)`,
+      })
+      break // one chokepoint tag per unit max
+    }
+
+    // Confluence hits (Step 13.5) — drainage convergence within ~150 m.
+    const confHits = confluenceTree.search({
+      minX: lon, maxX: lon, minY: lat, maxY: lat,
+    })
+    if (confHits.length > 0) {
+      tags.push({
+        type: 'confluence',
+        strength: 'moderate',
+        description: 'Confluence of drainage mouths',
+      })
+    }
+
     return tags
   }
 
   return {
     pointStats: { features: pointFeatures, tags: pointCount },
     mouthStats: { features: mouthFeatures, tags: mouthCount },
+    chokepointStats: { tags: chokepointCount },
+    confluenceStats: { tags: confluenceCount },
     tagUnit,
   }
 }

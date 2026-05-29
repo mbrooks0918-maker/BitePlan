@@ -16,7 +16,15 @@ import {
   fetchTidePredictions,
   type TidePrediction,
 } from '@/lib/tides'
-import { fetchWeather, type HourlyPeriod, type WeatherSnapshot } from '@/lib/weather'
+import {
+  fetchWeather,
+  frontalPhaseAt,
+  pressureAt,
+  pressureTrendInHgPer3hAt,
+  type HourlyPeriod,
+  type PressureSample,
+  type WeatherSnapshot,
+} from '@/lib/weather'
 import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
@@ -361,6 +369,11 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     latestScoreReqId = reqId
     set({ scoringInProgress: true })
 
+    // Step 13.5: derive the audit-v2 environmental fields once per request.
+    // Per-window context inside the worker (day-conditions, projection) will
+    // re-derive these from the same packed arrays we ship below.
+    const env = deriveCurrentEnv(currentWeather, currentTime)
+
     scoringWorker.postMessage({
       type: 'score',
       reqId,
@@ -373,6 +386,12 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       windSpeedKt: currentWeather?.current.speedKt ?? 0,
       windDirectionCompass: currentWeather?.current.directionCompass,
       hourlyWind: currentWeather?.hourly.map(packHourly) ?? [],
+      pressureSeries: currentWeather?.pressureSeries.map(packPressure) ?? [],
+      waterTempF: env.waterTempF,
+      pressureInHg: env.pressureInHg,
+      pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
+      frontalPhase: env.frontalPhase,
+      airTempF: currentWeather?.current.temperatureF ?? 0,
       maxUnits: MAX_SCORED_UNITS,
     })
   },
@@ -429,6 +448,11 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     latestDayConditionsReqId = reqId
 
     const weather = get().currentWeather
+    // For day conditions we use TODAY's current env as the carry-forward
+    // fallback. The worker re-derives per-window env (water-temp estimate,
+    // pressure trend, frontal phase) when the packed pressure / hourly
+    // series cover the window time; otherwise it falls back to these.
+    const env = deriveCurrentEnv(weather, startDate)
     scoringWorker.postMessage({
       type: 'computeDayConditions',
       reqId,
@@ -442,18 +466,93 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       windSpeedKt: weather?.current.speedKt ?? 0,
       windDirectionCompass: weather?.current.directionCompass,
       hourlyWind: weather?.hourly.map(packHourly) ?? [],
+      pressureSeries: weather?.pressureSeries.map(packPressure) ?? [],
+      waterTempF: env.waterTempF,
+      pressureInHg: env.pressureInHg,
+      pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
+      frontalPhase: env.frontalPhase,
+      airTempF: weather?.current.temperatureF ?? 0,
     })
     void dayMs
   },
 }))
 
-// Compact form of HourlyPeriod for transmission to the worker — drops fields
-// the scoring engine doesn't need (forecast text, temperature, precip).
+// Compact form of HourlyPeriod for transmission to the worker. Step 13.5
+// keeps temperature + forecast text now too — the worker needs them to derive
+// per-window water-temp estimates and per-window frontal-phase signals when
+// scoring the 12-day trip dashboard or the projection's 56 future windows.
 function packHourly(p: HourlyPeriod) {
   return {
     startMs: p.startMs,
     endMs: p.endMs,
     windSpeedKt: p.windSpeedKt,
     windDirectionCompass: p.windDirectionCompass,
+    temperatureF: p.temperatureF,
+    shortForecast: p.shortForecast,
+    precipProbability: p.precipProbability,
+  }
+}
+
+// Compact form of PressureSample — identical shape but isolated as a separate
+// type so changes to the weather module don't ripple into the worker
+// message contract.
+function packPressure(s: PressureSample) {
+  return { startMs: s.startMs, endMs: s.endMs, inHg: s.inHg }
+}
+
+/**
+ * Step 13.5 — seasonal lag estimate from air temp → water temp. Used both
+ * for the "current" scoring snapshot and per-window in the worker (which
+ * imports this helper indirectly via its own packed copy).
+ *
+ * TODO: replace with NDBC station #42012 buoy data in a future step for
+ * true water temp.
+ */
+export function estimateWaterTempF(airTempF: number, month: number): number {
+  if (!Number.isFinite(airTempF) || airTempF === 0) return 0
+  // Spring (Mar-May): water lags ~3°F behind air.
+  if (month >= 3 && month <= 5) return airTempF - 3
+  // Summer (Jun-Aug): ~2°F behind.
+  if (month >= 6 && month <= 8) return airTempF - 2
+  // Fall (Sep-Nov): air cools faster than water → water runs warmer.
+  if (month >= 9 && month <= 11) return airTempF + 2
+  // Winter (Dec-Feb): water holds warmth longest.
+  return airTempF + 5
+}
+
+/**
+ * Step 13.5 — derive scoring-context environmental fields from a weather
+ * snapshot at the current scoring time. Returns the four new ScoringContext
+ * fields needed by the audit-v2 scoring rules. When weather is null we hand
+ * back neutral defaults so the rules degrade gracefully.
+ */
+export function deriveCurrentEnv(
+  weather: WeatherSnapshot | null,
+  atTime: Date,
+): {
+  waterTempF: number
+  pressureInHg: number
+  pressureTrendInHgPer3h: number
+  frontalPhase: 'pre' | 'during' | 'post' | 'stable'
+} {
+  if (!weather) {
+    return {
+      waterTempF: 0,
+      pressureInHg: 30.0,
+      pressureTrendInHgPer3h: 0,
+      frontalPhase: 'stable',
+    }
+  }
+  const tMs = atTime.getTime()
+  const month = atTime.getMonth() + 1
+  const airTempF = weather.current.temperatureF
+  const pressureInHg = pressureAt(weather, tMs) ?? 30.0
+  const trend = pressureTrendInHgPer3hAt(weather, tMs)
+  const phase = frontalPhaseAt(weather, tMs)
+  return {
+    waterTempF: estimateWaterTempF(airTempF, month),
+    pressureInHg,
+    pressureTrendInHgPer3h: trend,
+    frontalPhase: phase,
   }
 }

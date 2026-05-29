@@ -34,9 +34,19 @@ export type HabitatFeature = {
 
 /** Structural-feature tag attached to a scoring unit. The convergence-scoring
  *  philosophy (Step 12.5, see handoff doc) gates units out of hot/fire tiers
- *  unless they carry at least one of these tags. */
+ *  unless they carry at least one of these tags.
+ *
+ *  Step 13.5 adds two subtypes per the audit memo:
+ *  - chokepoint: tidal pinch (< 300 m) between two larger water bodies
+ *    (the 5 known Gulf passes are hardcoded since habitat polygons can't
+ *    represent them directly)
+ *  - confluence: two creek/drainage mouths within ~100 m of each other —
+ *    stronger than a single mouth
+ *
+ *  Each `type` counts as a distinct kind for the 2-different-types unlock
+ *  gate in `scoring.ts`. */
 export type ConvergenceTag = {
-  type: 'point' | 'creek_mouth' | 'transition'
+  type: 'point' | 'creek_mouth' | 'transition' | 'chokepoint' | 'confluence'
   description: string
   strength: 'weak' | 'moderate' | 'strong'
 }
@@ -86,6 +96,21 @@ export type ScoringContext = {
   month: number
   /** 0 - 23 in local time. */
   hour: number
+  // ----- Step 13.5 audit factors -----
+  /** Water temperature in °F. Currently estimated from air temperature + a
+   *  seasonal lag model (spring lag ~−3 °F, summer −2 °F, fall +2 °F, winter
+   *  +5 °F). Replace with NDBC buoy #42012 reading in a future step. 0 when
+   *  weather unavailable. */
+  waterTempF: number
+  /** Current barometric pressure in inHg. 30.00 when weather unavailable
+   *  (neutral). */
+  pressureInHg: number
+  /** Pressure trend in inHg per 3 hours, forward-looking (pressure 3 h from
+   *  now minus pressure now). Negative = falling. 0 when unknown. */
+  pressureTrendInHgPer3h: number
+  /** Frontal-passage phase derived from forecast keywords + pressure trend.
+   *  Default 'stable' when no frontal signal is detected. */
+  frontalPhase: 'pre' | 'during' | 'post' | 'stable'
 }
 
 export type FactorCategory =
@@ -98,6 +123,10 @@ export type FactorCategory =
   | 'season'
   | 'depth'
   | 'convergence'
+  // ----- Step 13.5 audit factors -----
+  | 'temperature'
+  | 'pressure'
+  | 'front'
 
 export type ScoringFactor = {
   fired: boolean

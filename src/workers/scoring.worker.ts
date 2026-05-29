@@ -72,7 +72,25 @@ type PackedHourly = {
   endMs: number
   windSpeedKt: number
   windDirectionCompass: string
+  /** Step 13.5 additions — used for per-window water-temp + frontal-phase
+   *  derivation inside the worker. */
+  temperatureF: number
+  shortForecast: string
+  precipProbability: number
 }
+type PackedPressure = { startMs: number; endMs: number; inHg: number }
+
+/** Step 13.5 — env fields the worker needs as a fallback for windows beyond
+ *  the NWS forecast horizon. The store derives these for "now"; the worker
+ *  uses them as carry-forward defaults when per-window data isn't available. */
+type FallbackEnv = {
+  waterTempF: number
+  pressureInHg: number
+  pressureTrendInHgPer3h: number
+  frontalPhase: 'pre' | 'during' | 'post' | 'stable'
+  airTempF: number
+}
+
 type InitMessage = { type: 'init'; reqId: number }
 type ScoreMessage = {
   type: 'score'
@@ -86,6 +104,12 @@ type ScoreMessage = {
   windSpeedKt: number
   windDirectionCompass?: string
   hourlyWind: PackedHourly[]
+  pressureSeries: PackedPressure[]
+  waterTempF: number
+  pressureInHg: number
+  pressureTrendInHgPer3h: number
+  frontalPhase: 'pre' | 'during' | 'post' | 'stable'
+  airTempF: number
   maxUnits: number
 }
 type ComputeDayConditionsMessage = {
@@ -104,6 +128,12 @@ type ComputeDayConditionsMessage = {
   windSpeedKt: number
   windDirectionCompass?: string
   hourlyWind: PackedHourly[]
+  pressureSeries: PackedPressure[]
+  waterTempF: number
+  pressureInHg: number
+  pressureTrendInHgPer3h: number
+  frontalPhase: 'pre' | 'during' | 'post' | 'stable'
+  airTempF: number
 }
 type MainToWorker = InitMessage | ScoreMessage | ComputeDayConditionsMessage
 
@@ -120,6 +150,119 @@ function windForTime(
     if (h.startMs <= timeMs && timeMs < h.endMs) return h
   }
   return null
+}
+
+/** Pressure at `timeMs` from a sparse series. null when not bracketed. */
+function pressureForTime(timeMs: number, series: PackedPressure[]): number | null {
+  for (const p of series) {
+    if (p.startMs <= timeMs && timeMs < p.endMs) return p.inHg
+  }
+  return null
+}
+
+/** Step 13.5 — seasonal lag estimate from air temp → water temp.
+ *  Mirror of `estimateWaterTempF` in the store; duplicated here so the
+ *  worker stays standalone (no main-thread imports during scoring). */
+function estimateWaterTempF(airTempF: number, month: number): number {
+  if (!Number.isFinite(airTempF) || airTempF === 0) return 0
+  if (month >= 3 && month <= 5) return airTempF - 3
+  if (month >= 6 && month <= 8) return airTempF - 2
+  if (month >= 9 && month <= 11) return airTempF + 2
+  return airTempF + 5
+}
+
+/**
+ * Per-window frontal-phase derivation for projection / day-conditions.
+ * Mirrors `frontalPhaseAt` in weather.ts but operates on the packed series
+ * the worker receives. Pre-frontal trips on either a fast pressure drop
+ * over the next 6h OR rain/thunder anywhere in the next 24h of hourly
+ * forecast. Falls back to the message-level frontalPhase when neither
+ * window has data.
+ */
+function frontalPhaseForTime(
+  timeMs: number,
+  hourly: PackedHourly[],
+  pressureSeries: PackedPressure[],
+  fallback: FallbackEnv['frontalPhase'],
+): FallbackEnv['frontalPhase'] {
+  const SIX_H = 6 * 60 * 60 * 1000
+  const HORIZON_24H = 24 * 60 * 60 * 1000
+
+  const now = pressureForTime(timeMs, pressureSeries)
+  const plus6 = pressureForTime(timeMs + SIX_H, pressureSeries)
+  const now3 = pressureForTime(timeMs + 3 * 60 * 60 * 1000, pressureSeries)
+  const trend3 = now != null && now3 != null ? now3 - now : 0
+
+  // 'during' — strong negative trend + thunder/storm keyword in current hour
+  const currentHour = windForTime(timeMs, hourly)
+  const currentFc = (currentHour?.shortForecast ?? '').toLowerCase()
+  if (/thunder|storm|heavy rain/i.test(currentFc) && trend3 < -0.05) return 'during'
+
+  // 'pre' — rain/storm keyword in next 24h OR pressure dropping > 0.10/6h
+  let rainAhead = false
+  for (const h of hourly) {
+    if (h.startMs >= timeMs && h.startMs < timeMs + HORIZON_24H) {
+      if (/rain|shower|thunder|storm/i.test(h.shortForecast)) {
+        rainAhead = true
+        break
+      }
+    }
+  }
+  const fastDrop = now != null && plus6 != null && plus6 - now <= -0.10
+  if (rainAhead || fastDrop) return 'pre'
+
+  if (trend3 > 0.05) return 'post'
+
+  // If we had no data at all, defer to the message-level fallback.
+  if (now == null && currentHour == null) return fallback
+  return 'stable'
+}
+
+/**
+ * Build the per-window scoring context for projection / day-conditions.
+ * Combines per-window data (when bracketed by the hourly or pressure
+ * series) with the message-level fallback for windows beyond the NWS
+ * horizon (carry-forward approximation, same approach the worker has used
+ * since Step 13).
+ */
+function perWindowEnv(
+  timeMs: number,
+  hourly: PackedHourly[],
+  pressureSeries: PackedPressure[],
+  fallback: FallbackEnv,
+  fallbackWindKt: number,
+  fallbackWindDir: string | undefined,
+): {
+  windSpeedKt: number
+  windDirectionCompass: string | undefined
+  waterTempF: number
+  pressureInHg: number
+  pressureTrendInHgPer3h: number
+  frontalPhase: FallbackEnv['frontalPhase']
+} {
+  const month = new Date(timeMs).getMonth() + 1
+  const matchedHourly = windForTime(timeMs, hourly)
+  const windSpeedKt = matchedHourly?.windSpeedKt ?? fallbackWindKt
+  const windDirectionCompass = matchedHourly?.windDirectionCompass ?? fallbackWindDir
+  const airTempF = matchedHourly?.temperatureF ?? fallback.airTempF
+  const waterTempF =
+    matchedHourly != null
+      ? estimateWaterTempF(airTempF, month)
+      : fallback.waterTempF
+  const pNow = pressureForTime(timeMs, pressureSeries)
+  const pFwd = pressureForTime(timeMs + 3 * 60 * 60 * 1000, pressureSeries)
+  const pressureInHg = pNow ?? fallback.pressureInHg
+  const pressureTrendInHgPer3h =
+    pNow != null && pFwd != null ? pFwd - pNow : fallback.pressureTrendInHgPer3h
+  const frontalPhase = frontalPhaseForTime(timeMs, hourly, pressureSeries, fallback.frontalPhase)
+  return {
+    windSpeedKt,
+    windDirectionCompass,
+    waterTempF,
+    pressureInHg,
+    pressureTrendInHgPer3h,
+    frontalPhase,
+  }
 }
 
 export type ScoredEntry = { unit: ScoringUnit; result: ScoringResult }
@@ -258,6 +401,12 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       dailyTideRangeFt: dailyTideRange(msg.tidePredictions, time),
       month: time.getMonth() + 1,
       hour: time.getHours(),
+      // Step 13.5 audit fields — derived by the store before the message,
+      // so all units in this pass score against the same env snapshot.
+      waterTempF: msg.waterTempF,
+      pressureInHg: msg.pressureInHg,
+      pressureTrendInHgPer3h: msg.pressureTrendInHgPer3h,
+      frontalPhase: msg.frontalPhase,
     }
 
     const features = getVisibleHabitat(msg.bounds)
@@ -357,14 +506,26 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
         const { state: tideState } = getCurrentTideState(msg.tidePredictions, windowTime)
         const { sunrise, sunset } = getSunTimes(windowTime, msg.stationLat, msg.stationLon)
 
-        // Per-window wind: prefer the matching NWS hourly forecast; fall
-        // back to the current observed wind for windows beyond NWS's
-        // ~7-day forecast range. The fallback is a carry-forward
-        // approximation; documented here because it's used in both the
-        // day-conditions picker and the projection engine.
-        const hourly = windForTime(windowStartMs, msg.hourlyWind)
-        const windKt = hourly?.windSpeedKt ?? msg.windSpeedKt
-        const windDir = hourly?.windDirectionCompass ?? msg.windDirectionCompass
+        // Per-window env: prefer NWS hourly / pressure data for windows
+        // inside the forecast horizon; fall back to message-level
+        // carry-forward values otherwise. The audit-v2 factors (water temp,
+        // pressure trend, frontal phase) all participate in this lookup so
+        // the 12-day trip dashboard reflects how conditions actually shift
+        // across the trip, not just today's snapshot.
+        const env = perWindowEnv(
+          windowStartMs,
+          msg.hourlyWind,
+          msg.pressureSeries,
+          {
+            waterTempF: msg.waterTempF,
+            pressureInHg: msg.pressureInHg,
+            pressureTrendInHgPer3h: msg.pressureTrendInHgPer3h,
+            frontalPhase: msg.frontalPhase,
+            airTempF: msg.airTempF,
+          },
+          msg.windSpeedKt,
+          msg.windDirectionCompass,
+        )
 
         const ctx: ScoringContext = {
           time: windowTime,
@@ -373,11 +534,15 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
           moonIllumination: getMoonIllumination(windowTime),
           sunrise,
           sunset,
-          windSpeedKt: windKt,
-          windDirectionCompass: windDir,
+          windSpeedKt: env.windSpeedKt,
+          windDirectionCompass: env.windDirectionCompass,
           dailyTideRangeFt: dailyTideRange(msg.tidePredictions, windowTime),
           month: windowTime.getMonth() + 1,
           hour: windowTime.getHours(),
+          waterTempF: env.waterTempF,
+          pressureInHg: env.pressureInHg,
+          pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
+          frontalPhase: env.frontalPhase,
         }
 
         let windowMax = 0

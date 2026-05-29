@@ -240,6 +240,135 @@ Bare, featureless shoreline — even prime habitat on a perfect rising tide at d
 
 This directive is a North Star; the specific numbers and detection thresholds will be tuned during Step 12.5.
 
+### SCORING AUDIT (Rules Calibration v2 — research-backed, to apply as Step 13.5)
+
+**Status:** directive locked, scheduled to apply as Step 13.5 once Step 13 (NWS weather) commits.
+**Source base:** peer-reviewed fisheries research, FWC / TPWD / SC DNR habitat publications, NOAA Sea Grant, multiple credentialed Gulf inshore guide publications. Citations to be embedded as code comments alongside each rule when implemented.
+
+#### Top-line philosophy
+The current scoring rules are mostly directionally correct but contain three classes of error:
+
+1. **Season weights are calibrated for a generic Gulf coast and overstate May–June for the panhandle specifically.**
+2. **Several known fish-behavior drivers are missing entirely** — water temperature, barometric pressure trend, frontal passage, wind direction.
+3. **Species differentiation is absent** — current rules treat redfish / trout / flounder identically despite well-documented behavioral differences.
+
+#### Confirmed (keep as-is)
+- **Convergence-as-unlock model with strict 2-different-types gating:** VALIDATED by literature (TPWD: "Breaks in continuity of shorelines such as coves, points, jetties, old pier pilings, and guts attract them.")
+- **Dawn / dusk +2 time bonus:** VALIDATED across all sources.
+- **Tide stage matters:** VALIDATED, but needs species differentiation (see below).
+- **Moon phase modest effect:** VALIDATED but already partially captured via the tide range factor. Reduce from +0.5 to +0.25 to avoid double-counting.
+
+#### Habitat baseline recalibration
+- Seagrass **+2** (keep)
+- Marsh **+2** (keep)
+- Oysters **+2.5** (slight bump — guide and FWC consensus calls oysters the #1 inshore structure for redfish; current +2 understates)
+
+#### Season recalibration (panhandle-specific)
+Current rules overstate May–June and have insufficient granularity. Replace the current month bands with month-specific values:
+
+| Month | Value | Notes |
+|---|---|---|
+| Jan | −1 grass flats, 0 deep structure | cold push |
+| Feb | −1 grass flats, 0 deep structure | cold push |
+| Mar | +1 | spring warming |
+| Apr | +1 | warming continues |
+| May | +1 | transition; flounder return from Gulf |
+| Jun | 0 baseline | with summer midday penalty −1.5 |
+| Jul | 0 baseline | with summer midday penalty −1.5 |
+| Aug | 0 baseline | with summer midday penalty −1.5 |
+| Sep | +2 | fall transition begins, bull redfish runs |
+| Oct | +2.5 | **PEAK month**, multi-source confirmed |
+| Nov | +2 | still peak |
+| Dec | −1 grass flats, 0 deep structure | cold push |
+
+This means a June trip is **shoulder season**, not peak. Forecasts should reflect this honestly.
+
+#### Tide stage — species differentiation
+When the species filter is active, apply species-specific tide rules.
+
+**Redfish filter:**
+- Marsh edge rising **+2**, falling **+0.5**
+- Oyster bar moving water **+1**
+- Grass edge rising **+1**
+- Slack **−1** across the board
+
+**Trout filter** (seam preference is strong):
+- Grass edge any moving water **+1.5**
+- Oyster bar downcurrent side **+1.5**
+- Drainage mouth any moving water **+1**
+- Slack **−1**
+
+**Flounder filter** (ambush at drains is the most-documented behavior):
+- Drainage mouth FALLING **+2.5**
+- Pass / chokepoint any moving water **+2**
+- Grass edge any moving water **+1**
+- Marsh edge falling **+1.5** (ambush bait pulled out)
+
+When species filter is "all", use the **average of the three species rules**.
+
+#### Wind — add direction modifier
+Current speed-only rules stay. ADD a direction modifier (panhandle-specific compass orientation, ±1 magnitude max):
+
+- **N / NE wind:** −0.5 (post-frontal cold push); but in winter, trout **+0.5** (clarity on flats)
+- **E / SE wind:** 0 (most stable / best inshore)
+- **S / SW wind:** −0.5 clarity penalty, **+0.5 bait concentration on shorelines** (helps redfish)
+- **W / NW wind:** −1 if tide is already falling (compounding water-out-of-bay loss)
+
+#### Daily tide range recalibration
+- **> 1.5 ft:** +0.5
+- **0.8–1.5 ft:** 0
+- **< 0.8 ft:** −0.5
+
+(Better matches panhandle diurnal patterns than the current 1.2 / 0.5 thresholds.)
+
+#### Moon
+- Reduce from **+0.5 to +0.25** for illumination > 0.9 or < 0.1.
+- Rationale: most of the moon's effect is mediated through spring tides, already captured by the tide range factor. Avoid double-counting.
+
+#### NEW: Water temperature factor
+- **Below 55 °F:** −2 all (cold-stunned territory for trout)
+- **55–65 °F:** −1 redfish / trout, neutral flounder (more cold-tolerant)
+- **65–72 °F:** +1 all (optimal range)
+- **72–80 °F:** +0.5 (peak for all three species)
+- **80–85 °F:** 0
+- **Above 85 °F:** −1 (heat stress, especially midday summer)
+
+**Data source:** NDBC station buoy data preferred (Pensacola buoy **#42012** is in-range); fall back to a seasonal estimate from air temperature if the buoy is unavailable.
+
+#### NEW: Barometric pressure trend factor
+Direction of change matters more than absolute value.
+
+- **Falling > 0.05 inHg in 3 hours:** +1 all species, **+1.5 trout** (pre-front bite — most documented bite trigger in the literature)
+- **Stable** (within ±0.02 inHg / 3 hr): 0
+- **Rising > 0.05 inHg in 3 hours:** −0.5 (post-front)
+- **Sustained high > 30.30 inHg for 24+ hours:** −0.5 (bluebird stable)
+
+**Data source:** NWS hourly forecast already includes barometric pressure; will be in Step 13's `WeatherSnapshot`.
+
+#### NEW: Frontal passage compound factor
+The strongest non-tide environmental trigger in the literature.
+
+- **Pre-frontal** (front in NWS forecast within 24 h, OR pressure drop > 0.10 inHg in past 6 h): **+1.5 all**
+- **During passage:** 0 (chaotic)
+- **Post-frontal 24–36 h after** (clear, stable high): **−1**
+- **Stabilized 48 h+ after:** 0
+
+#### NEW: Pass / chokepoint convergence detection
+Add to the convergence detector a `subtype: 'chokepoint'` for water passages **< 300 m wide** between two larger water bodies. Perdido Pass, Pensacola Pass, and Destin's East Pass qualify. Stronger weight in the unlock logic. These are documented as flounder-stacking spots and bull-redfish run paths.
+
+#### Confluence detection
+Where two creek / drainage mouths meet open water within close proximity (**~100 m**). Stronger than a single drainage mouth. New `subtype: 'confluence'`.
+
+#### Things to remove or de-emphasize
+- Current **"May–Jun +1 peak inshore"** — REMOVE; replace with the month-specific values above.
+- Current **"Sep–Oct +2 across the board"** — REPLACE with month-specific (Sep +2, Oct +2.5, Nov +2).
+
+#### Implementation sequencing (decided)
+Step 13 (weather) lands first. Then **Step 13.5 applies this entire audit in one combined pass:** rule recalibration + new factors + new convergence subtypes. **Single coherent commit** so the trip forecast meaningfully re-scores once and stabilizes.
+
+#### Open question deferred to implementation
+Whether popup factor descriptions should cite sources ("per FWC research", "guide consensus") will be decided after seeing a sample in Step 13.5 implementation.
+
 ### Algorithm (runs on view change or time scrub)
 
 1. **Get visible habitat polygons** in current map bounds via spatial filter against loaded GeoJSON

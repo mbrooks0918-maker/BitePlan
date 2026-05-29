@@ -112,7 +112,9 @@ export async function initHabitatIndex(): Promise<void> {
     console.info(
       `[habitat] convergence: ${convergenceCtx.pointStats.tags} point tags from ` +
         `${convergenceCtx.pointStats.features} features, ` +
-        `${convergenceCtx.mouthStats.tags} mouth tags from ${convergenceCtx.mouthStats.features} features ` +
+        `${convergenceCtx.mouthStats.tags} mouth tags from ${convergenceCtx.mouthStats.features} features, ` +
+        `${convergenceCtx.chokepointStats.tags} chokepoint tags, ` +
+        `${convergenceCtx.confluenceStats.tags} confluence tags ` +
         `(${tC} ms)`,
     )
 

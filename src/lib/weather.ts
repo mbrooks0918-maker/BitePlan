@@ -39,6 +39,21 @@ export type HourlyPeriod = {
   temperatureF: number
 }
 
+/** Step 13.5 — barometric pressure series sourced from the raw NWS
+ *  `/gridpoints/{office}/{x},{y}` endpoint. Values come back as a time series
+ *  in pascals; we convert to inHg here and keep the original ISO validTime
+ *  intervals as { startMs, inHg } samples.
+ *
+ *  Pressure factor (audit memo A.8) and frontal-phase detection (A.9) both
+ *  read this. Empty array when the gridpoint fetch failed or pressure layer
+ *  was missing — callers degrade to neutral pressure (30.00 inHg / 0 trend).
+ */
+export type PressureSample = {
+  startMs: number
+  endMs: number
+  inHg: number
+}
+
 export type WeatherSnapshot = {
   current: {
     speedKt: number
@@ -52,6 +67,11 @@ export type WeatherSnapshot = {
    *  returns ~156 hours; we keep the full set so projection windows out to
    *  day +7 can sample real per-hour wind where it exists. */
   hourly: HourlyPeriod[]
+  /** Step 13.5 — pressure time series in inHg from the raw gridpoints
+   *  endpoint. Sparser than `hourly` (NWS typically reports pressure every
+   *  3-6 hours over the same forward window). Empty when the gridpoints
+   *  fetch failed. */
+  pressureSeries: PressureSample[]
   fetchedAt: number
 }
 
@@ -120,7 +140,14 @@ function readCache(key: string): CacheEntry | null {
   try {
     const raw = window.localStorage.getItem(key)
     if (!raw) return null
-    return JSON.parse(raw) as CacheEntry
+    const parsed = JSON.parse(raw) as CacheEntry
+    // Defensive shim for Step-13-era cache entries (pre-13.5) that don't
+    // carry a pressureSeries field. Without this, every returning user with
+    // a fresh-window cache crashes the scoring pass on first reload.
+    if (!parsed.snapshot.pressureSeries) {
+      parsed.snapshot.pressureSeries = []
+    }
+    return parsed
   } catch {
     return null
   }
@@ -139,6 +166,7 @@ function writeCache(key: string, entry: CacheEntry): void {
 type NwsPointsResp = {
   properties?: {
     forecastHourly?: string
+    forecastGridData?: string
     gridId?: string
     gridX?: number
     gridY?: number
@@ -159,6 +187,17 @@ type NwsHourlyResp = {
   }
 }
 
+type NwsGridValue = { validTime?: string; value?: number | null }
+type NwsGridLayer = { uom?: string; values?: NwsGridValue[] }
+type NwsGridResp = {
+  properties?: {
+    pressure?: NwsGridLayer
+    // Some NWS offices report under `barometricPressure` instead — fall back
+    // to that field if `pressure` is missing.
+    barometricPressure?: NwsGridLayer
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     headers: {
@@ -170,14 +209,80 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T
 }
 
+/**
+ * Parse an NWS `validTime` interval of the form "2026-05-28T18:00:00+00:00/PT3H"
+ * into start/end epoch ms. Returns [0, 0] when malformed.
+ */
+function parseValidTime(vt: string | undefined): [number, number] {
+  if (!vt) return [0, 0]
+  const slash = vt.indexOf('/')
+  if (slash < 0) return [0, 0]
+  const startIso = vt.slice(0, slash)
+  const durStr = vt.slice(slash + 1)
+  const startMs = new Date(startIso).getTime()
+  if (!Number.isFinite(startMs)) return [0, 0]
+  // ISO 8601 duration: PnYnMnDTnHnMnS. NWS only ever uses PTnH or PnD here.
+  let hours = 0
+  const hMatch = durStr.match(/PT(\d+)H/)
+  if (hMatch) hours = Number(hMatch[1])
+  const dMatch = durStr.match(/P(\d+)D/)
+  if (dMatch) hours += Number(dMatch[1]) * 24
+  const endMs = startMs + Math.max(1, hours) * 60 * 60 * 1000
+  return [startMs, endMs]
+}
+
+/**
+ * Pull the pressure layer out of a gridpoint response. NWS reports it in
+ * pascals on most modern endpoints (`uom: "wmoUnit:Pa"`); convert to inHg.
+ * If the layer is missing entirely, return an empty array — callers degrade
+ * to neutral pressure.
+ */
+function extractPressureSeries(grid: NwsGridResp): PressureSample[] {
+  const layer = grid.properties?.pressure ?? grid.properties?.barometricPressure
+  const values = layer?.values
+  if (!values || values.length === 0) return []
+  const uom = (layer?.uom ?? '').toLowerCase()
+  // Default conversion: Pa → inHg (× 0.00029530). NWS sometimes reports in
+  // hPa/mbar — detect and scale up first.
+  const toInHg = (v: number): number => {
+    if (uom.includes('hpa') || uom.includes('mbar')) return v * 0.02953
+    // Pa
+    return v * 0.0002953
+  }
+  const out: PressureSample[] = []
+  for (const v of values) {
+    if (typeof v.value !== 'number' || !Number.isFinite(v.value)) continue
+    const [startMs, endMs] = parseValidTime(v.validTime)
+    if (startMs === 0) continue
+    out.push({ startMs, endMs, inHg: toInHg(v.value) })
+  }
+  out.sort((a, b) => a.startMs - b.startMs)
+  return out
+}
+
 async function fetchFromNws(lat: number, lon: number): Promise<WeatherSnapshot> {
   const pointsUrl = `https://api.weather.gov/points/${lat.toFixed(4)},${lon.toFixed(4)}`
   const points = await fetchJson<NwsPointsResp>(pointsUrl)
   const hourlyUrl = points.properties?.forecastHourly
+  const gridUrl = points.properties?.forecastGridData
   if (!hourlyUrl) {
     throw new Error('NWS points response missing forecastHourly URL')
   }
-  const hourly = await fetchJson<NwsHourlyResp>(hourlyUrl)
+
+  // Hourly + gridpoints run in parallel. The gridpoints fetch is the slower
+  // of the two (larger payload); if it fails for any reason we degrade
+  // gracefully to an empty pressureSeries rather than failing the whole
+  // snapshot — wind/temp/precip from `hourly` are the primary use case.
+  const [hourly, grid] = await Promise.all([
+    fetchJson<NwsHourlyResp>(hourlyUrl),
+    gridUrl
+      ? fetchJson<NwsGridResp>(gridUrl).catch((e) => {
+          console.warn('[weather] gridpoints fetch failed (pressure will degrade):', e)
+          return null
+        })
+      : Promise.resolve(null),
+  ])
+
   const periods = hourly.properties?.periods ?? []
   if (periods.length === 0) {
     throw new Error('NWS hourly response had no periods')
@@ -202,6 +307,8 @@ async function fetchFromNws(lat: number, lon: number): Promise<WeatherSnapshot> 
   parsed.sort((a, b) => a.startMs - b.startMs)
   const first = parsed[0]
 
+  const pressureSeries = grid ? extractPressureSeries(grid) : []
+
   return {
     current: {
       speedKt: first.windSpeedKt,
@@ -212,6 +319,7 @@ async function fetchFromNws(lat: number, lon: number): Promise<WeatherSnapshot> 
       temperatureF: first.temperatureF,
     },
     hourly: parsed,
+    pressureSeries,
     fetchedAt: Date.now(),
   }
 }
@@ -269,4 +377,94 @@ export function hourlyAt(snapshot: WeatherSnapshot, timeMs: number): HourlyPerio
     if (h.startMs <= timeMs && timeMs < h.endMs) return h
   }
   return null
+}
+
+// --- Step 13.5 pressure / front helpers ----------------------------------
+
+/**
+ * Pressure at `timeMs` (inHg). Linear scan of the (sparse) pressure series;
+ * returns null when `timeMs` is outside the covered window so callers can
+ * fall back to a neutral default.
+ */
+export function pressureAt(snapshot: WeatherSnapshot, timeMs: number): number | null {
+  for (const p of snapshot.pressureSeries) {
+    if (p.startMs <= timeMs && timeMs < p.endMs) return p.inHg
+  }
+  return null
+}
+
+/**
+ * Forward-looking pressure trend in inHg per 3 h, sampled at `timeMs`. NWS
+ * only publishes forecast forward of the snapshot's fetch time, so we proxy
+ * "pressure is falling now" as `pressure(t + 3h) − pressure(t)`. Negative =
+ * falling.
+ *
+ * This is the audit memo's pre-frontal bite signal (A.8). When the series
+ * doesn't bracket either sample point we return 0 (stable) — neutral.
+ */
+export function pressureTrendInHgPer3hAt(
+  snapshot: WeatherSnapshot,
+  timeMs: number,
+): number {
+  const now = pressureAt(snapshot, timeMs)
+  const fwd = pressureAt(snapshot, timeMs + 3 * 60 * 60 * 1000)
+  if (now == null || fwd == null) return 0
+  return fwd - now
+}
+
+/**
+ * Classify the frontal-passage phase at `timeMs`.
+ *
+ * Heuristics (audit memo A.9):
+ *  - 'pre'   : pressure dropping fast (> 0.10 inHg in next 6 h) OR forecast
+ *              shortForecast contains storm/thunder/rain keywords within 24 h
+ *  - 'during': very strong negative trend now (< -0.05 inHg/3h) AND current
+ *              shortForecast contains 'thunder' / 'storm' / 'heavy rain'
+ *  - 'post'  : 24–36 h after a recent front — heuristically, pressure is
+ *              rising (> +0.05 inHg/3h) right after a stretch of low values
+ *  - 'stable': default
+ *
+ * Detection is intentionally rough. We don't have ground-truth front timing
+ * — these are forward-looking proxies derived from what NWS publishes.
+ */
+export function frontalPhaseAt(
+  snapshot: WeatherSnapshot,
+  timeMs: number,
+): 'pre' | 'during' | 'post' | 'stable' {
+  const SIX_H = 6 * 60 * 60 * 1000
+  const HORIZON_24H = 24 * 60 * 60 * 1000
+
+  const now = pressureAt(snapshot, timeMs)
+  const plus6 = pressureAt(snapshot, timeMs + SIX_H)
+  const trend3 = pressureTrendInHgPer3hAt(snapshot, timeMs)
+
+  // Storm keywords in current short forecast → during.
+  const currentHour = hourlyAt(snapshot, timeMs)
+  const currentFc = (currentHour?.shortForecast ?? '').toLowerCase()
+  const stormNow =
+    /thunder|storm|heavy rain/i.test(currentFc) && trend3 < -0.05
+  if (stormNow) return 'during'
+
+  // Pre-frontal: forecast rain/thunder anywhere in next 24h OR pressure
+  // dropping fast over the next 6h.
+  let rainAhead = false
+  for (const h of snapshot.hourly) {
+    if (h.startMs >= timeMs && h.startMs < timeMs + HORIZON_24H) {
+      if (/rain|shower|thunder|storm/i.test(h.shortForecast)) {
+        rainAhead = true
+        break
+      }
+    }
+  }
+  const fastDrop = now != null && plus6 != null && plus6 - now <= -0.10
+  if (rainAhead || fastDrop) return 'pre'
+
+  // Post-frontal: pressure rising (positive trend) after a recent low. We
+  // approximate "recent low" by checking if the past 12 hours of the series
+  // (where available — usually not, since it's forward-only) contained
+  // values noticeably lower than now. Without historical data this collapses
+  // to "rising trend now" → 'post'.
+  if (trend3 > 0.05) return 'post'
+
+  return 'stable'
 }
