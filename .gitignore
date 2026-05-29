@@ -25,6 +25,9 @@ Thumbs.db
 # Agent / IDE local state
 .claude/
 
+# Vercel local state
+.vercel/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
