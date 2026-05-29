@@ -1,14 +1,23 @@
 import { create } from 'zustand'
+import { format as formatDate } from 'date-fns'
 import type {
   Bounds,
   DayCondition,
   HeatZone,
   LatLon,
+  ScoringContext,
   ScoringResult,
   ScoringUnit,
   Species,
   TimeMode,
+  Waypoint,
 } from '@/types'
+import {
+  listAllWaypoints,
+  newWaypointId,
+  persistWaypoint,
+  removeWaypoint,
+} from '@/lib/waypoints'
 import { getNearestStation, type Station } from '@/lib/stations'
 import type { NamedAnchor } from '@/lib/anchors'
 import {
@@ -151,6 +160,17 @@ type BitePlanState = {
   // Step 13.6 depth integration
   depthFilterMode: DepthFilterMode
 
+  // Step 14 — saved waypoints (persisted in window.localStorage under
+  // `waypoints:{uuid}`). The store mirrors the persisted set; persistence
+  // is write-through via lib/waypoints.ts.
+  waypoints: Waypoint[]
+  /** The waypoint currently inside its 4.5s "tap toast to rename" window.
+   *  null when no save is pending. The Save flow uses this to know which
+   *  waypoint the toast / rename inline should target. */
+  pendingRenameWaypointId: string | null
+  /** Waypoint shown in the saved-waypoint popup when a map pin is tapped. */
+  selectedWaypointId: string | null
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
@@ -161,6 +181,22 @@ type BitePlanState = {
   setTimeMode: (mode: TimeMode) => void
   setTripModeOverride: (value: boolean | null) => void
   setDepthFilterMode: (mode: DepthFilterMode) => void
+
+  /** Step 14: save a waypoint for the given scored entry + scoring context.
+   *  Builds the default label, generates an id, persists, and seeds
+   *  pendingRenameWaypointId so the toast can offer rename. */
+  saveWaypoint: (
+    unit: ScoringUnit,
+    result: ScoringResult,
+    ctx: ScoringContext,
+    depthMLLWFt: number | null,
+  ) => string
+  renameWaypoint: (id: string, newLabel: string) => void
+  deleteWaypoint: (id: string) => void
+  /** Clears `pendingRenameWaypointId`. The toast calls this on auto-dismiss
+   *  or when the rename inline closes. */
+  clearPendingRename: () => void
+  selectWaypoint: (id: string | null) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -302,6 +338,11 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   dayConditionsLoading: false,
   tripModeOverride: loadTripOverride(),
   depthFilterMode: loadDepthFilter(),
+  // Hydrate the in-memory waypoint mirror from localStorage at store-create
+  // time. Subsequent saves write through lib/waypoints.ts.
+  waypoints: listAllWaypoints(),
+  pendingRenameWaypointId: null,
+  selectedWaypointId: null,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -337,6 +378,66 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     // recompute so the dots update immediately.
     get().recomputeScoredUnits()
   },
+
+  saveWaypoint: (unit, result, ctx, depthMLLWFt) => {
+    const id = newWaypointId()
+    const createdAt = Date.now()
+    const scoredAt = ctx.time.getTime()
+    // Default label: "Waypoint — Mon DD, h:mm AM/PM" in LOCAL time. Per the
+    // handoff doc this matches `date-fns` format string "MMM d, h:mm a".
+    const label = `Waypoint — ${formatDate(ctx.time, 'MMM d, h:mm a')}`
+    const [lon, lat] = unit.centroid
+    const w: Waypoint = {
+      id,
+      label,
+      lat,
+      lon,
+      createdAt,
+      scoredAt,
+      habitatType: unit.habitatType,
+      tier: result.tier,
+      score: result.score,
+      tideState: ctx.tideState,
+      species: ctx.species,
+      // Snapshot the convergence tags as plain { subtype, description }
+      // records so the saved entry doesn't drift if the tag type union
+      // changes in a future audit. `subtype` mirrors `ConvergenceTag.type`.
+      convergenceTags: unit.convergence.map((t) => ({
+        subtype: t.type,
+        description: t.description,
+      })),
+      depthMLLWFt,
+    }
+    persistWaypoint(w)
+    set((s) => ({
+      waypoints: [...s.waypoints, w],
+      pendingRenameWaypointId: id,
+    }))
+    return id
+  },
+
+  renameWaypoint: (id, newLabel) => {
+    set((s) => {
+      const next = s.waypoints.map((w) => (w.id === id ? { ...w, label: newLabel } : w))
+      const found = next.find((w) => w.id === id)
+      if (found) persistWaypoint(found)
+      return { waypoints: next }
+    })
+  },
+
+  deleteWaypoint: (id) => {
+    removeWaypoint(id)
+    set((s) => ({
+      waypoints: s.waypoints.filter((w) => w.id !== id),
+      // If the just-deleted waypoint was the pending-rename target, clear it
+      // so the toast / rename UI doesn't try to act on a missing waypoint.
+      pendingRenameWaypointId:
+        s.pendingRenameWaypointId === id ? null : s.pendingRenameWaypointId,
+    }))
+  },
+
+  clearPendingRename: () => set({ pendingRenameWaypointId: null }),
+  selectWaypoint: (id) => set({ selectedWaypointId: id }),
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

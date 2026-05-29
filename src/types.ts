@@ -203,3 +203,42 @@ export type HeatZone = {
   topUnit: ScoringUnit
   topResult: ScoringResult
 }
+
+/**
+ * Step 14 — saved waypoint.
+ *
+ * Persisted in `window.storage` under `waypoints:{uuid}` per the handoff
+ * doc. Auto-captures the conditions at save time so the angler can recall
+ * "why I saved this" without having to re-derive the scoring context.
+ *
+ * Snapshots are intentionally NOT re-scored when the underlying engine
+ * changes — the value is in remembering what was true at the moment of
+ * saving, not in chasing a moving target. Future steps can layer "open
+ * this saved spot in the live scoring view" on top.
+ */
+export interface Waypoint {
+  /** UUID via crypto.randomUUID(). */
+  id: string
+  /** User-visible name; default `"Waypoint — Jun 4, 7:42 AM"` per handoff doc. */
+  label: string
+  lat: number
+  lon: number
+  /** Epoch ms the waypoint was created (real wall time). */
+  createdAt: number
+  /** Epoch ms of the scoring context the user was looking at when they hit
+   *  Save — may differ from `createdAt` when scrubbing time. */
+  scoredAt: number
+  habitatType: HabitatType
+  tier: Tier
+  /** Score at scoredAt, 0-10. */
+  score: number
+  tideState: TideState
+  /** Species filter active at save time. */
+  species: Species
+  /** Convergence tag subtypes that fired at save time (for "why I saved this"
+   *  recall when the popup opens later). */
+  convergenceTags: Array<{ subtype: string; description: string }>
+  /** Chart depth at MLLW at the waypoint's lat/lon, ft. null when out of
+   *  grid coverage or the depth lookup failed at save time. */
+  depthMLLWFt: number | null
+}

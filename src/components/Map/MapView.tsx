@@ -10,6 +10,9 @@ import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
 import NamedAnchors from './NamedAnchors'
 import AnchorPopup from './AnchorPopup'
+import SavedWaypoints from './SavedWaypoints'
+import SavedWaypointPopup from './SavedWaypointPopup'
+import SaveToast from '@/components/SaveWaypoint/SaveToast'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 import WeatherReadout from '@/components/BottomSheet/WeatherReadout'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
@@ -158,6 +161,7 @@ function MapView() {
         <DepthContours />
         <ScoredZones />
         <NamedAnchors />
+        <SavedWaypoints />
         <MapStateSync />
         <InvalidateSizeOnMount />
       </MapContainer>
@@ -174,6 +178,8 @@ function MapView() {
       )}
       <ZonePopup />
       <AnchorPopup />
+      <SavedWaypointPopup />
+      <SaveToast />
     </>
   )
 }

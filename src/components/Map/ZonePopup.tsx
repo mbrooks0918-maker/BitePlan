@@ -24,6 +24,7 @@ import { deriveCurrentEnv, useBitePlanStore, type ScoredEntry } from '@/store/us
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { dailyTideRange, getCurrentTideState, tideLevelAtFt } from '@/lib/tides'
 import { getCachedProjection, type ProjectionResult } from '@/lib/projection'
+import { getDepthAtMLLW, initDepthGrid } from '@/lib/depth'
 
 // Tier → header background + button background. Spec colors from handoff doc.
 const TIER_BG: Record<Tier, string> = {
@@ -227,8 +228,42 @@ function ZonePopup() {
   }
 
   const onSaveWaypoint = () => {
-    // TODO Step 14: persist waypoint via window.storage with captured context.
-    console.info('TODO Step 14: save waypoint', unit.id)
+    // Step 14: build the same ScoringContext the projection used and hand
+    // it to the store. The store generates an id, persists, and primes the
+    // toast-rename flow via pendingRenameWaypointId. We close the popup so
+    // the toast and map pin are immediately visible.
+    const state = useBitePlanStore.getState()
+    const { currentTime, currentStation, tidePredictions, species, currentWeather, depthFilterMode } = state
+    const { state: tideState } = getCurrentTideState(tidePredictions, currentTime)
+    const { sunrise, sunset } = getSunTimes(currentTime, currentStation.lat, currentStation.lon)
+    const env = deriveCurrentEnv(currentWeather, currentTime)
+    const ctx: ScoringContext = {
+      time: currentTime,
+      tideState,
+      species,
+      moonIllumination: getMoonIllumination(currentTime),
+      sunrise,
+      sunset,
+      windSpeedKt: currentWeather?.current.speedKt ?? 0,
+      windDirectionCompass: currentWeather?.current.directionCompass,
+      dailyTideRangeFt: dailyTideRange(tidePredictions, currentTime),
+      month: currentTime.getMonth() + 1,
+      hour: currentTime.getHours(),
+      waterTempF: env.waterTempF,
+      pressureInHg: env.pressureInHg,
+      pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
+      frontalPhase: env.frontalPhase,
+      tideLevelAboveMLLWFt: tideLevelAtFt(tidePredictions, currentTime),
+      depthFilterMode,
+    }
+    // Load the depth grid lazily on the main thread the first time a save
+    // happens — the worker has its own copy; this is just for snapshot
+    // accuracy in the Waypoint record. Idempotent across calls.
+    void initDepthGrid()
+    const [lon, lat] = unit.centroid
+    const depth = getDepthAtMLLW(lat, lon)
+    state.saveWaypoint(unit, result, ctx, depth)
+    selectZone(null)
   }
 
   return (

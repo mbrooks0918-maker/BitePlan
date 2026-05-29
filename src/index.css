@@ -194,3 +194,23 @@
   width: 100%;
   height: 100%;
 }
+
+/* ------------------------------------------------------------------
+ * Saved-waypoint markers (Step 14)
+ *
+ * A bookmark icon — white fill with a tier-colored stroke. The Leaflet
+ * marker container is transparent; the inner div carries the SVG.
+ * Smaller than the named-anchor disc since waypoints can stack densely.
+ * ------------------------------------------------------------------ */
+.biteplan-waypoint-marker {
+  background: transparent !important;
+}
+.biteplan-waypoint-icon {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+}
+.biteplan-waypoint-icon svg {
+  width: 100%;
+  height: 100%;
+}
