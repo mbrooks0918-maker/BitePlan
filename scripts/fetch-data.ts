@@ -39,6 +39,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fromArrayBuffer } from 'geotiff'
+import * as turf from '@turf/turf'
+import { runConvergenceDetection } from '../src/lib/convergence.ts'
+import type { HabitatFeature, HabitatType } from '../src/types.ts'
 
 // --- coverage area (handoff doc) -------------------------------------------
 
@@ -632,14 +635,80 @@ async function main(): Promise<void> {
     return { type: 'FeatureCollection', features: features as unknown as Feature[] }
   })
 
+  // ---- Step 20 perf: pre-compute convergence detection ----
+  //
+  // The runtime convergence detector walks every ring vertex of every
+  // habitat feature (millions of visits at our scale) and used to
+  // dominate the cold pass. Running it once here and serialising the
+  // detected primitives drops that phase from ~30 s of CPU at app boot
+  // to a small JSON parse.
+  //
+  // We run detection BEFORE simplification because the geometric
+  // detectors (point inflections, creek-mouth pinch widths) rely on the
+  // un-simplified vertex topology to surface the right features. The
+  // simplified geometries get written to disk for everything else
+  // (visual rendering, edge sampling) where ~10 m resolution is plenty.
+  console.log('\n[perf] pre-computing convergence index...')
+  const allForConvergence: HabitatFeature[] = []
+  for (const fc of [
+    { type: 'seagrass' as HabitatType, features: seagrass.features },
+    { type: 'oyster' as HabitatType, features: oysters.features },
+    { type: 'wetland' as HabitatType, features: wetlands.features },
+  ]) {
+    let i = 0
+    for (const f of fc.features) {
+      const idCandidate =
+        (f.properties as Record<string, unknown> | null)?.['OBJECTID'] ??
+        (f.properties as Record<string, unknown> | null)?.['Wetlands.OBJECTID'] ??
+        i++
+      allForConvergence.push({
+        id: `${fc.type}:${idCandidate}`,
+        type: fc.type,
+        geometry: f.geometry as HabitatFeature['geometry'],
+        properties: (f.properties ?? {}) as Record<string, unknown>,
+      })
+    }
+  }
+  const tCv0 = Date.now()
+  const convergencePrimitives = runConvergenceDetection(allForConvergence)
+  console.log(
+    `[perf] convergence: ${convergencePrimitives.points.length} points + ${convergencePrimitives.mouths.length} mouths in ${((Date.now() - tCv0) / 1000).toFixed(1)}s`,
+  )
+
+  // ---- Step 20 perf: simplify habitat polygons ----
+  //
+  // turf.simplify removes redundant vertices using a Douglas-Peucker pass
+  // with the given tolerance (degrees, NOT metres). 0.0001 deg ~ 10 m,
+  // which is well below our 100 m edge-sampling cadence so visible
+  // rendering is unaffected. Run AFTER convergence detection so the
+  // detector sees the original topology.
+  //
+  // Oysters are point-cluster features at our scale — simplification
+  // produces no visible win and would risk dropping small bars. Skip.
+  function simplifyFc(label: string, fc: FeatureCollection, toleranceDeg: number): FeatureCollection {
+    if (fc.features.length === 0) return fc
+    const t0 = Date.now()
+    const simplified = turf.simplify(fc as never, {
+      tolerance: toleranceDeg,
+      highQuality: false,
+      mutate: false,
+    }) as unknown as FeatureCollection
+    const secs = ((Date.now() - t0) / 1000).toFixed(1)
+    console.log(`[perf] simplified ${label} (tol=${toleranceDeg} deg) in ${secs}s`)
+    return simplified
+  }
+  const seagrassSimplified = simplifyFc('seagrass', seagrass, 0.0001)
+  const wetlandsSimplified = simplifyFc('wetlands', wetlands, 0.0001)
+
   // ---- write everything ----
   console.log('\nWriting files...')
-  const sgBytes = await writeJson('seagrass.geojson', seagrass)
+  const sgBytes = await writeJson('seagrass.geojson', seagrassSimplified)
   const oyBytes = await writeJson('oysters.geojson', oysters)
-  const wtBytes = await writeJson('wetlands.geojson', wetlands)
+  const wtBytes = await writeJson('wetlands.geojson', wetlandsSimplified)
   const tsBytes = await writeJson('tide_stations.json', TIDE_STATIONS)
   const dgBytes = await writeJson('depth_grid.json', depthGridReal)
   const ctBytes = await writeJson('depth_contours.geojson', contoursFc)
+  const cvBytes = await writeJson('convergence_index.json', convergencePrimitives)
 
   const fmt = (n: number) => n.toLocaleString('en-US')
   const kb = (n: number) => `${(n / 1024).toFixed(1)} KB`
@@ -653,6 +722,7 @@ async function main(): Promise<void> {
   console.log(`  tide_stations.json       ${TIDE_STATIONS.length.toString().padStart(7)} stations    ${size(tsBytes)}`)
   console.log(`  depth_grid.json          ${fmt(depthGridReal.width ?? 0)} × ${fmt(depthGridReal.height ?? 0)} cells    ${size(dgBytes)}`)
   console.log(`  depth_contours.geojson   ${fmt(contoursFc.features.length).padStart(7)} lines       ${size(ctBytes)}`)
+  console.log(`  convergence_index.json   ${fmt(convergencePrimitives.points.length + convergencePrimitives.mouths.length).padStart(7)} prims       ${size(cvBytes)}`)
 }
 
 main().catch((e) => {

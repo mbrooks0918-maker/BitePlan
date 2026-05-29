@@ -68,6 +68,10 @@ export default defineConfig({
           { url: '/data/tide_stations.json', revision: null },
           { url: '/data/depth_grid.json', revision: null },
           { url: '/data/depth_contours.geojson', revision: null },
+          // Step 20: precomputed convergence primitives. Tiny (~12 KB)
+          // and load-critical — habitat init falls back to the slow
+          // runtime detector if this is missing.
+          { url: '/data/convergence_index.json', revision: null },
         ],
         runtimeCaching: [
           // B.1 — Esri World Imagery tiles: CacheFirst, 30 day TTL, LRU

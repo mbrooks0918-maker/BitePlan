@@ -190,6 +190,9 @@ type BitePlanState = {
   scoredUnits: ScoredEntry[]
   zones: HeatZone[]
   scoringInProgress: boolean
+  /** Step 20: true when the worker watchdog fires before a score
+   *  response. UI surfaces a "Scoring stalled — try reloading" toast. */
+  scoringStalled: boolean
   lastScoringMs: number
   habitatIndexReady: boolean
 
@@ -341,6 +344,28 @@ const scoringWorker = new Worker(
 let nextReqId = 1
 let latestScoreReqId = 0
 
+// Step 20 — worker watchdog. If the worker doesn't respond within 90s
+// of a posted score request we surface a banner so the user can reload
+// instead of staring at a frozen spinner.
+const SCORING_WATCHDOG_MS = 90_000
+let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+function startScoringWatchdog(): void {
+  if (watchdogTimer) clearTimeout(watchdogTimer)
+  watchdogTimer = setTimeout(() => {
+    console.error(
+      `[store] scoring watchdog fired — no worker response in ${SCORING_WATCHDOG_MS}ms`,
+    )
+    inFlightSignature = null
+    useBitePlanStore.setState({ scoringInProgress: false, scoringStalled: true })
+  }, SCORING_WATCHDOG_MS)
+}
+function clearScoringWatchdog(): void {
+  if (watchdogTimer) {
+    clearTimeout(watchdogTimer)
+    watchdogTimer = null
+  }
+}
+
 // Debounce timer for setCurrentTime → recompute. See setCurrentTime below.
 let timeRecomputeTimeout: ReturnType<typeof setTimeout> | null = null
 function scheduleTimeRecompute(fn: () => void): void {
@@ -403,10 +428,12 @@ scoringWorker.onmessage = (e: MessageEvent<WorkerToMain>) => {
     // could clobber the result of a fresher pan that completed first.
     if (msg.reqId !== latestScoreReqId) return
     inFlightSignature = null
+    clearScoringWatchdog()
     useBitePlanStore.setState({
       scoredUnits: msg.entries,
       zones: msg.zones,
       scoringInProgress: false,
+      scoringStalled: false,
       lastScoringMs: msg.ms,
     })
   }
@@ -445,6 +472,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   scoredUnits: [],
   zones: [],
   scoringInProgress: false,
+  scoringStalled: false,
   lastScoringMs: 0,
   habitatIndexReady: false,
   selectedZone: null,
@@ -691,6 +719,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     const reqId = nextReqId++
     latestScoreReqId = reqId
     set({ scoringInProgress: true })
+    startScoringWatchdog()
 
     // Step 13.5: derive the audit-v2 environmental fields once per request.
     // Per-window context inside the worker (day-conditions, projection) will

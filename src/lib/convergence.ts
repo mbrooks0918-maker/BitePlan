@@ -331,57 +331,100 @@ export type ConvergenceContext = {
   ) => ConvergenceTag[]
 }
 
+/**
+ * Step 20 — Node-runnable detection pass. Returns the raw detected
+ * primitives (points + creek mouths) so the fetch-data script can
+ * serialise them once at build time and the runtime can skip ~30 s of
+ * vertex-level math on every cold load.
+ *
+ * Output is per-feature in the same iteration order as the input. Callers
+ * that hydrate at runtime should pass these back to
+ * `buildConvergenceContextFromPrecomputed` along with the original
+ * feature list (needed for transition queries that consult the habitat
+ * tree).
+ */
+export type DetectedPrimitives = {
+  points: DetectedPoint[]
+  mouths: DetectedMouth[]
+  pointFeatureCount: number
+  mouthFeatureCount: number
+}
+
+export function runConvergenceDetection(features: HabitatFeature[]): DetectedPrimitives {
+  const points: DetectedPoint[] = []
+  const mouths: DetectedMouth[] = []
+  let pointFeatureCount = 0
+  let mouthFeatureCount = 0
+  for (const f of features) {
+    let foundPoint = false
+    let foundMouth = false
+    eachOuterRing(f.geometry, (ring) => {
+      const ringPoints = detectPointsOnRing(ring, f.type)
+      if (ringPoints.length > 0) foundPoint = true
+      for (const p of ringPoints) points.push(p)
+      if (f.type === 'wetland') {
+        const ringMouths = detectCreekMouthsOnRing(ring)
+        if (ringMouths.length > 0) foundMouth = true
+        for (const m of ringMouths) mouths.push(m)
+      }
+    })
+    if (foundPoint) pointFeatureCount++
+    if (foundMouth) mouthFeatureCount++
+  }
+  return { points, mouths, pointFeatureCount, mouthFeatureCount }
+}
+
+/**
+ * Step 20 — hydrate a ConvergenceContext from precomputed primitives.
+ * Mirrors `buildConvergenceContext` but skips the detection loop —
+ * everything downstream (chokepoint hardcode, confluence pairwise scan,
+ * tagger) runs identically against the same data structures.
+ */
+export function buildConvergenceContextFromPrecomputed(
+  primitives: DetectedPrimitives,
+): ConvergenceContext {
+  return buildConvergenceContextInner(primitives)
+}
+
 export function buildConvergenceContext(features: HabitatFeature[]): ConvergenceContext {
+  const primitives = runConvergenceDetection(features)
+  return buildConvergenceContextInner(primitives)
+}
+
+function buildConvergenceContextInner(primitives: DetectedPrimitives): ConvergenceContext {
   const pointTree = new RBush<IndexedPoint>()
   const mouthTree = new RBush<IndexedMouth>()
   const chokepointTree = new RBush<IndexedChokepoint>()
   const confluenceTree = new RBush<IndexedConfluence>()
 
   let pointCount = 0
-  let pointFeatures = 0
   let mouthCount = 0
-  let mouthFeatures = 0
   let chokepointCount = 0
   let confluenceCount = 0
+  const pointFeatures = primitives.pointFeatureCount
+  const mouthFeatures = primitives.mouthFeatureCount
 
-  // Collect every detected mouth (with its location) so we can do a pairwise
-  // proximity scan below to derive confluence tags.
-  const allMouths: DetectedMouth[] = []
-
-  for (const f of features) {
-    let foundPoint = false
-    let foundMouth = false
-    eachOuterRing(f.geometry, (ring) => {
-      const points = detectPointsOnRing(ring, f.type)
-      if (points.length > 0) foundPoint = true
-      for (const p of points) {
-        const dLat = POINT_TAG_RADIUS_M * DEG_PER_M_LAT
-        const dLon = POINT_TAG_RADIUS_M * degPerMeterLon(p.lat)
-        pointTree.insert({
-          minX: p.lon - dLon, maxX: p.lon + dLon,
-          minY: p.lat - dLat, maxY: p.lat + dLat,
-          tag: p,
-        })
-        pointCount++
-      }
-      if (f.type === 'wetland') {
-        const mouths = detectCreekMouthsOnRing(ring)
-        if (mouths.length > 0) foundMouth = true
-        for (const m of mouths) {
-          const dLat = CREEK_TAG_RADIUS_M * DEG_PER_M_LAT
-          const dLon = CREEK_TAG_RADIUS_M * degPerMeterLon(m.lat)
-          mouthTree.insert({
-            minX: m.lon - dLon, maxX: m.lon + dLon,
-            minY: m.lat - dLat, maxY: m.lat + dLat,
-            tag: m,
-          })
-          mouthCount++
-          allMouths.push(m)
-        }
-      }
+  // Build the point + mouth trees from the precomputed primitives.
+  for (const p of primitives.points) {
+    const dLat = POINT_TAG_RADIUS_M * DEG_PER_M_LAT
+    const dLon = POINT_TAG_RADIUS_M * degPerMeterLon(p.lat)
+    pointTree.insert({
+      minX: p.lon - dLon, maxX: p.lon + dLon,
+      minY: p.lat - dLat, maxY: p.lat + dLat,
+      tag: p,
     })
-    if (foundPoint) pointFeatures++
-    if (foundMouth) mouthFeatures++
+    pointCount++
+  }
+  const allMouths: DetectedMouth[] = primitives.mouths
+  for (const m of allMouths) {
+    const dLat = CREEK_TAG_RADIUS_M * DEG_PER_M_LAT
+    const dLon = CREEK_TAG_RADIUS_M * degPerMeterLon(m.lat)
+    mouthTree.insert({
+      minX: m.lon - dLon, maxX: m.lon + dLon,
+      minY: m.lat - dLat, maxY: m.lat + dLat,
+      tag: m,
+    })
+    mouthCount++
   }
 
   // --- Confluence pass ---------------------------------------------------

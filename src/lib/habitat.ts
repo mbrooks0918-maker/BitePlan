@@ -21,7 +21,12 @@ import type {
   Polygon,
 } from 'geojson'
 import type { Bounds, ConvergenceTag, HabitatFeature, HabitatType, ScoringUnit } from '@/types'
-import { buildConvergenceContext, type ConvergenceContext } from '@/lib/convergence'
+import {
+  buildConvergenceContext,
+  buildConvergenceContextFromPrecomputed,
+  type ConvergenceContext,
+  type DetectedPrimitives,
+} from '@/lib/convergence'
 import { getDepthAtMLLW, isDepthGridReady } from '@/lib/depth'
 
 const SOURCES: Array<{ url: string; type: HabitatType }> = [
@@ -86,12 +91,22 @@ export async function initHabitatIndex(): Promise<void> {
   if (initialized) return
   if (initPromise) return initPromise
   initPromise = (async () => {
-    const t0 = performance.now()
+    // Step 20 perf instrumentation: per-phase wall-clock breakdown so the
+    // next optimisation pass can target the actual hot path. Logs land in
+    // the worker console (see DevTools → Sources → Workers).
+    const tTotal = performance.now()
     const all: HabitatFeature[] = []
+    const tFetch = performance.now()
     for (const src of SOURCES) {
+      const tSrc = performance.now()
       const features = await loadOne(src)
+      const ms = (performance.now() - tSrc).toFixed(0)
+      console.info(`[habitat/perf] fetch ${src.type}: ${features.length} features in ${ms}ms`)
       all.push(...features)
     }
+    console.info(`[habitat/perf] all fetches: ${(performance.now() - tFetch).toFixed(0)}ms`)
+
+    const tBbox = performance.now()
     const items: IndexedItem[] = []
     for (const f of all) {
       try {
@@ -101,17 +116,46 @@ export async function initHabitatIndex(): Promise<void> {
         // Skip malformed geometries silently — they're empty stubs from failed fetches.
       }
     }
+    console.info(`[habitat/perf] bbox: ${(performance.now() - tBbox).toFixed(0)}ms`)
+    const tLoad = performance.now()
     tree.load(items)
-    const tIndex = (performance.now() - t0).toFixed(0)
-    console.info(`[habitat] indexed ${items.length} features in ${tIndex}ms`)
+    console.info(`[habitat/perf] rbush load: ${(performance.now() - tLoad).toFixed(0)}ms`)
+    console.info(`[habitat] indexed ${items.length} features in ${(performance.now() - tTotal).toFixed(0)}ms`)
 
     // Convergence detection (Step 12.5) — one-shot pass that tags points,
     // creek mouths, and (lazily, at derive time) habitat transitions.
+    //
+    // Step 20 perf: prefer the fetch-time precomputed primitives at
+    // /data/convergence_index.json. The detection pass walks every ring
+    // vertex of every feature (millions of visits at our scale) and used
+    // to dominate cold load. With the precomputed file we just rebuild
+    // the rbush trees from the saved points + mouths — O(N tags) rather
+    // than O(M vertices). Falls back to runtime detection when the file
+    // is missing (dev without fresh fetch-data, or stale offline cache).
     const tC0 = performance.now()
-    convergenceCtx = buildConvergenceContext(all)
+    let precomputed: DetectedPrimitives | null = null
+    try {
+      const r = await fetch('/data/convergence_index.json')
+      if (r.ok) {
+        const j = (await r.json()) as DetectedPrimitives
+        if (
+          j &&
+          Array.isArray((j as DetectedPrimitives).points) &&
+          Array.isArray((j as DetectedPrimitives).mouths)
+        ) {
+          precomputed = j
+        }
+      }
+    } catch {
+      // No precomputed file — fall through to the runtime detector.
+    }
+    convergenceCtx = precomputed
+      ? buildConvergenceContextFromPrecomputed(precomputed)
+      : buildConvergenceContext(all)
     const tC = (performance.now() - tC0).toFixed(0)
     console.info(
-      `[habitat] convergence: ${convergenceCtx.pointStats.tags} point tags from ` +
+      `[habitat] convergence (${precomputed ? 'precomputed' : 'runtime'}): ` +
+        `${convergenceCtx.pointStats.tags} point tags from ` +
         `${convergenceCtx.pointStats.features} features, ` +
         `${convergenceCtx.mouthStats.tags} mouth tags from ${convergenceCtx.mouthStats.features} features, ` +
         `${convergenceCtx.chokepointStats.tags} chokepoint tags, ` +
@@ -119,6 +163,7 @@ export async function initHabitatIndex(): Promise<void> {
         `(${tC} ms)`,
     )
 
+    console.info(`[habitat/perf] total init: ${(performance.now() - tTotal).toFixed(0)}ms`)
     initialized = true
   })()
   return initPromise
