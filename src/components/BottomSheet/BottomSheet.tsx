@@ -1,53 +1,72 @@
 /**
- * Bottom sheet (Step 16 + Step 22 follow-up) — 4-snap-point mobile UI.
+ * Bottom sheet (Step 16 + Step 22 follow-ups) — 4-snap-point mobile UI.
  *
  * Replaces the floating panels from Steps 5–15. Four snap points:
  *
- *   Handle (~36px / ~4.5vh on a typical phone): DEFAULT. Just the drag pill
- *                + a few px of slate background. Map dominates the screen.
+ *   Handle (~36px on every screen): DEFAULT. Just the drag pill + a few
+ *                px of slate background. Map dominates the screen.
  *   Peek (10vh): tide pill + conditions score + time indicator. Secondary
- *                state reachable by drag — not the default any more.
+ *                state reachable by drag — not the default.
  *   Half (50vh): time strip, top zones list, tier + species filters.
- *   Full (90vh): layer toggles, depth filter, Trip toggle, saved
- *                waypoints list, settings stub.
+ *   Full (70vh): layer toggles, depth filter, Trip toggle, saved
+ *                waypoints list, settings. Capped at 70vh so the map
+ *                stays visible above the sheet even at maximum extent;
+ *                internal scrolling reaches the bottom of the content.
  *
- * Gesture model: drag the handle (or anywhere on the header strip) with a
- * pointer. While dragging, the sheet height tracks the pointer. On release
- * we snap to the nearest snap point, with a velocity-aware bypass — a fast
- * upward flick from Handle can land on Full directly. Snap is persisted to
- * `settings:sheetSnap` so the next load reopens at the same height.
+ * Drag-vs-scroll separation (critical for one-handed mobile use):
  *
- * Tap-to-dismiss: in MapView.tsx, a Leaflet `click` event on bare map (not
- * a scored zone, anchor pin, waypoint, GPS dot, or the sheet) snaps the
- * sheet back to `'handle'`. Tapping the handle row when collapsed expands
- * to Half. Together this gives a "panel comes and goes with your taps"
- * feel without ever obstructing the map permanently.
+ *   DRAG ZONE   — the header strip with the grab pill. Has pointer
+ *                 handlers + `touch-action: none` so the browser yields
+ *                 vertical gestures to our snap logic. Dragging here
+ *                 NEVER touches the content's scroll position; content
+ *                 scrollTop is preserved across snap transitions because
+ *                 React doesn't unmount or reset it.
+ *   SCROLL ZONE — the children area. Has `overflow-y-auto` + a
+ *                 `touch-action: pan-y` so the browser handles native
+ *                 vertical scroll. `overscroll-behavior: contain` keeps
+ *                 over-scroll out of the page body (no pull-to-refresh,
+ *                 no map-pan leakage). NO pointer-event handlers here —
+ *                 scrolling content cannot accidentally drag the sheet.
+ *   CLOSE       — a separate absolutely-positioned X button at top-right.
+ *                 Visible at peek/half/full (hidden at handle). Tapping
+ *                 it collapses to `'handle'`, providing an explicit
+ *                 affordance alongside drag-down and tap-map.
+ *
+ * Gesture model: drag the handle pill (or anywhere on the header strip)
+ * with a pointer. While dragging, the sheet height tracks the pointer.
+ * On release we snap to the nearest snap point, with a velocity-aware
+ * bypass — a fast upward flick from Handle can land on Full directly.
+ * Snap is persisted to `settings:sheetSnap`.
+ *
+ * Tap-to-dismiss: in MapView.tsx, a Leaflet `click` event on bare map
+ * snaps the sheet back to `'handle'`. Tapping the handle row when
+ * collapsed expands to Half.
  *
  * Implementation notes:
- *   - Height-based animation via CSS transitions on the container. React
- *     only updates state on pointer release; the active-drag height lives
- *     in a ref + raw inline style to avoid re-renders during the gesture.
- *   - Full-snap-only sections render lazily via `everOpenedFull` — once the
- *     user has reached Full, those components remain mounted so a second
- *     trip to Full feels instant.
- *   - At the Handle snap the children scroll-area is height-clipped to 0
- *     by the container, so we don't bother conditionally unmounting the
- *     children — the transition simply reveals them as the sheet grows.
+ *   - Height-based animation via CSS transitions on the container.
+ *     React only updates state on pointer release; the active-drag
+ *     height lives in a ref + raw inline style to avoid re-renders
+ *     during the gesture.
+ *   - Full-snap-only sections render lazily via `everOpenedFull` — once
+ *     the user has reached Full, those components remain mounted so a
+ *     second trip to Full feels instant.
  *   - z-30 sits above the map but below the popups (popup layer uses
  *     z-1100+ to overlay the sheet).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GripHorizontal } from 'lucide-react'
+import { GripHorizontal, X as XIcon } from 'lucide-react'
 import { useBitePlanStore, type SheetSnapPoint } from '@/store/useBitePlanStore'
 
 // Snap heights in vh. Handle is a hardcoded pixel value translated to vh on
-// the fly — see resolvedHandleVh — so the thin tab is the same physical size
-// across phones regardless of screen height.
+// the fly — see resolvedHandleVh — so the thin tab is the same physical
+// size across phones regardless of screen height. Full was reduced from
+// 90 → 70 in the second Step 22 follow-up so the map stays partly visible
+// even at maximum sheet extent; the content scrolls internally.
 const HANDLE_PX = 36
 const SNAP_HEIGHTS: Record<Exclude<SheetSnapPoint, 'handle'>, number> = {
   peek: 10,
   half: 50,
-  full: 90,
+  full: 70,
 }
 const SNAP_ORDER: SheetSnapPoint[] = ['handle', 'peek', 'half', 'full']
 // Velocity threshold for a flick that bypasses the nearest snap. Tuned by
@@ -113,9 +132,22 @@ function BottomSheet({ children }: Props) {
     (target: SheetSnapPoint) => {
       const el = sheetRef.current
       if (el) {
-        // Re-enable the transition so the snap is smooth.
+        // Re-enable the transition so the snap is smooth, and apply the
+        // target height inline so the browser NEVER sees an intermediate
+        // empty-height frame. If we cleared height to '' here instead,
+        // the layout would briefly collapse to content-auto before React
+        // re-rendered with the new vh value; during that frame the
+        // browser would clamp the scroll-area's scrollTop to 0 (since the
+        // scroll area momentarily has no overflow). That broke the
+        // "content scroll position should survive a snap change" safety
+        // rule. Setting the explicit height inline means the snap is one
+        // seamless animation from old height to new height with the
+        // scroll position untouched.
         el.style.transition = ''
-        el.style.height = ''
+        el.style.height =
+          target === 'handle'
+            ? `${HANDLE_PX}px`
+            : `${SNAP_HEIGHTS[target]}vh`
       }
       setSnap(target)
     },
@@ -244,9 +276,12 @@ function BottomSheet({ children }: Props) {
         pointerEvents: onWater ? 'none' : undefined,
       }}
     >
-      {/* Header strip — the drag target. The grab handle pill in the centre
-          gives the user a visual affordance; the entire row accepts pointer
-          events so the gesture works wherever the user grabs. */}
+      {/* Header strip — the DRAG ZONE. The grab handle pill in the centre
+          gives the user a visual affordance; the entire row accepts
+          pointer events so the gesture works wherever the user grabs.
+          touch-action: none disables built-in vertical scroll INSIDE the
+          drag zone only; the content area below explicitly opts back into
+          pan-y so its native scroll still works. */}
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -256,8 +291,6 @@ function BottomSheet({ children }: Props) {
         role="separator"
         aria-orientation="horizontal"
         aria-valuetext={snap}
-        // touch-action: none disables built-in vertical scroll while
-        // dragging the handle. The content below has its own scroll.
         className="shrink-0 cursor-grab active:cursor-grabbing select-none py-2 flex flex-col items-center gap-1"
         style={{ touchAction: 'none' }}
       >
@@ -275,11 +308,39 @@ function BottomSheet({ children }: Props) {
         </span>
       </div>
 
-      {/* Scrollable content — children compose Peek, Half, Full sections
-          in order. The parent's height clip is what hides the lower
-          sections when collapsed. */}
+      {/* X close button — second Step 22 follow-up. Hidden at handle
+          (where there's no panel to close) and in On-Water Mode (where
+          the sheet is translated off-screen). Absolutely positioned at
+          the top-right so it sits OUTSIDE the drag zone — taps on it
+          can never start a sheet drag. */}
+      {snap !== 'handle' && !onWater && (
+        <button
+          type="button"
+          aria-label="Hide panel"
+          onClick={() => commitSnap('handle')}
+          className={
+            'absolute top-1.5 right-2 z-10 size-9 inline-flex items-center justify-center ' +
+            'rounded-full text-slate-400 transition-colors ' +
+            'hover:text-slate-100 hover:bg-slate-800/70 ' +
+            'focus-visible:bg-slate-800 focus-visible:outline-none'
+          }
+        >
+          <XIcon className="size-4" aria-hidden />
+        </button>
+      )}
+
+      {/* Scrollable content — the SCROLL ZONE. Children compose Peek,
+          Half, Full sections in order. The parent's height clip is what
+          hides the lower sections when collapsed. No pointer-event
+          handlers here, so scrolling content cannot accidentally drag
+          the sheet. `touch-action: pan-y` explicitly grants the browser
+          native vertical pan so iOS doesn't fall back to the parent
+          `touch-action: none` from the drag zone. `overscroll-contain`
+          stops the scroll from chaining into the page body (no
+          pull-to-refresh, no map pan leakage). */}
       <div
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pb-[max(env(safe-area-inset-bottom,0),0.5rem)]"
+        style={{ touchAction: 'pan-y' }}
       >
         {children}
         {/* Pass-through so children can branch on the lazy-mount flag.
