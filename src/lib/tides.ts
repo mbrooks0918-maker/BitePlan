@@ -432,3 +432,36 @@ export function getCurrentTideState(
   const state: TideState = next.p.type === 'H' ? 'rising' : 'falling'
   return { state, nextEvent: next.p, minutesToNext }
 }
+
+/**
+ * Estimate water level above MLLW at `now`, in feet, from the merged
+ * multi-day hi/lo prediction window. Uses cosine interpolation between the
+ * two bracketing events — the same approximation `synthesizeCurveFromHilo`
+ * applies. Real tide curves are not perfectly sinusoidal, but for the
+ * coarse "is this cell currently navigable" threshold the depth filter
+ * uses, a cosine fit is more than accurate enough.
+ *
+ * Returns 0 when:
+ *   - no predictions are available
+ *   - `now` falls outside the window (no bracketing pair)
+ *
+ * Step 13.6 adds this; assumes `predictions` is the same merged sorted
+ * window the rest of the engine uses (assembleTideWindow output).
+ */
+export function tideLevelAtFt(predictions: TidePrediction[], now: Date): number {
+  if (predictions.length === 0) return 0
+  const nowMs = now.getTime()
+  const events = predictions
+    .map((p) => ({ ms: parseISO(p.t).getTime(), v: p.v }))
+    .sort((a, b) => a.ms - b.ms)
+
+  const prev = [...events].reverse().find((e) => e.ms <= nowMs) ?? null
+  const next = events.find((e) => e.ms > nowMs) ?? null
+  if (!prev || !next) return 0
+
+  const span = next.ms - prev.ms
+  if (span <= 0) return prev.v
+  const ratio = (nowMs - prev.ms) / span
+  const cosRatio = (1 - Math.cos(Math.PI * ratio)) / 2
+  return prev.v + (next.v - prev.v) * cosRatio
+}

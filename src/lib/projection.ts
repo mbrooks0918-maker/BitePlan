@@ -15,6 +15,7 @@ import {
   dailyTideRange,
   fetchTidePredictions,
   getCurrentTideState,
+  tideLevelAtFt,
   type TidePrediction,
 } from '@/lib/tides'
 import {
@@ -199,6 +200,9 @@ export async function projectNextFireWindow(
       ? frontalPhaseAt(weather, tMs)
       : currentCtx.frontalPhase
 
+    // Step 13.6 per-window tide level — same interpolation the worker uses.
+    const tideLevelAboveMLLWFt = tideLevelAtFt(allEvents, windowTime)
+
     const ctx: ScoringContext = {
       time: windowTime,
       tideState,
@@ -215,6 +219,8 @@ export async function projectNextFireWindow(
       pressureInHg,
       pressureTrendInHgPer3h,
       frontalPhase,
+      tideLevelAboveMLLWFt,
+      depthFilterMode: currentCtx.depthFilterMode,
     }
 
     const result = scoreUnit(unit, ctx)

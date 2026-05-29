@@ -38,9 +38,17 @@ import {
 } from '@/lib/habitat'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { scoreUnit } from '@/lib/scoring'
-import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
+import { dailyTideRange, getCurrentTideState, tideLevelAtFt } from '@/lib/tides'
+import {
+  depthGradientFt,
+  getCurrentDepth,
+  getDepthAtMLLW,
+  initDepthGrid,
+  isDepthGridReady,
+} from '@/lib/depth'
 import type {
   Bounds,
+  ConvergenceTag,
   DayCondition,
   HeatZone,
   ScoringContext,
@@ -91,6 +99,26 @@ type FallbackEnv = {
   airTempF: number
 }
 
+type DepthFilterMode = 'strict' | 'tide_aware' | 'tag_only'
+
+// Step 13.6 thresholds (handoff doc / locked design decisions)
+const DEPTH_SHALLOW_FT = 2          // kayak navigability cutoff
+const DEPTH_DEEP_FT = 30            // popup-only note threshold ("deep water")
+// Initial spec said 30 m / 3 ft. The depth grid resolution is 500 m, so a
+// 30 m sample step almost always reads the SAME cell, defeating the
+// detection. The audit-band thresholds (3 / 5 / 10 ft) were also tuned for
+// real 30 m bathymetry. At our 500 m grid resolution we ratchet the
+// offset up to 100 m (one neighbouring cell) and the minimum gradient to
+// 5 ft so only true "strong" channel-edge breaks survive. Step 20 perf
+// pass can revisit if a higher-res grid lands.
+const DEPTH_BREAK_OFFSET_M = 100
+const DEPTH_BREAK_MIN_DIFF_FT = 5
+// A depth_break should anchor a fish-holding spot — the centroid itself
+// must be in fishable water at MLLW (>1 ft). Without this gate, dry-at-low
+// wetland edges adjacent to a deeper bay get tagged as "channel edges"
+// they're not.
+const DEPTH_BREAK_MIN_CENTER_FT = 1
+
 type InitMessage = { type: 'init'; reqId: number }
 type ScoreMessage = {
   type: 'score'
@@ -110,6 +138,8 @@ type ScoreMessage = {
   pressureTrendInHgPer3h: number
   frontalPhase: 'pre' | 'during' | 'post' | 'stable'
   airTempF: number
+  tideLevelAboveMLLWFt: number
+  depthFilterMode: DepthFilterMode
   maxUnits: number
 }
 type ComputeDayConditionsMessage = {
@@ -134,6 +164,8 @@ type ComputeDayConditionsMessage = {
   pressureTrendInHgPer3h: number
   frontalPhase: 'pre' | 'during' | 'post' | 'stable'
   airTempF: number
+  tideLevelAboveMLLWFt: number
+  depthFilterMode: DepthFilterMode
 }
 type MainToWorker = InitMessage | ScoreMessage | ComputeDayConditionsMessage
 
@@ -216,6 +248,117 @@ function frontalPhaseForTime(
   // If we had no data at all, defer to the message-level fallback.
   if (now == null && currentHour == null) return fallback
   return 'stable'
+}
+
+/**
+ * Step 13.6 — compute per-unit depth info + a depth_break convergence tag
+ * if the gradient meets threshold. Reused by both the single-time score
+ * handler and the per-window day-conditions handler.
+ *
+ * Returns `null` for `surviveFilter` (i.e. exclude) when the depth filter
+ * mode rules out this unit. When the depth grid isn't loaded or has no
+ * coverage at this point, the filter never excludes (graceful degradation).
+ */
+function evaluateDepthForUnit(
+  unit: ScoringUnit,
+  tideLevelAboveMLLWFt: number,
+  depthFilterMode: DepthFilterMode,
+): {
+  surviveFilter: boolean
+  depthBreakTag: ConvergenceTag | null
+  shallowAtLowTide: boolean
+  deepWater: boolean
+} {
+  const [lon, lat] = unit.centroid
+  if (!isDepthGridReady()) {
+    return {
+      surviveFilter: true,
+      depthBreakTag: null,
+      shallowAtLowTide: false,
+      deepWater: false,
+    }
+  }
+  const mllw = getDepthAtMLLW(lat, lon)
+  if (mllw == null) {
+    // Out of grid coverage — let the unit through and skip tagging.
+    return {
+      surviveFilter: true,
+      depthBreakTag: null,
+      shallowAtLowTide: false,
+      deepWater: false,
+    }
+  }
+  const current = getCurrentDepth(lat, lon, tideLevelAboveMLLWFt) ?? 0
+  const shallowAtLowTide = mllw < DEPTH_SHALLOW_FT
+  const deepWater = mllw > DEPTH_DEEP_FT
+
+  let surviveFilter = true
+  if (depthFilterMode === 'strict' && shallowAtLowTide) surviveFilter = false
+  if (depthFilterMode === 'tide_aware' && current < DEPTH_SHALLOW_FT) surviveFilter = false
+  // 'tag_only' — never excludes; downstream popup carries the shallow tag.
+
+  let depthBreakTag: ConvergenceTag | null = null
+  const grad = depthGradientFt(lat, lon, DEPTH_BREAK_OFFSET_M)
+  if (
+    grad.maxDiff >= DEPTH_BREAK_MIN_DIFF_FT &&
+    grad.centerDepth != null &&
+    grad.centerDepth >= DEPTH_BREAK_MIN_CENTER_FT
+  ) {
+    // Find the neighbouring sample that produced maxDiff.
+    let otherDepth = grad.centerDepth
+    for (const s of grad.samples) {
+      if (s == null) continue
+      if (Math.abs(s - grad.centerDepth) === grad.maxDiff) {
+        otherDepth = s
+        break
+      }
+    }
+    // Per the audit's design ("Depth break: 6 ft → 12 ft within 30m"),
+    // BOTH sides of the break should be in fishable water. Without this
+    // gate, a wetland edge sitting at MLLW=0 next to a 6 ft bay reads as
+    // a depth_break, which isn't the channel-edge structure the audit
+    // intends — it's just the shoreline. Skip when the shallower side is
+    // out of kayak-fishable range at MLLW.
+    const a = Math.min(grad.centerDepth, otherDepth)
+    const b = Math.max(grad.centerDepth, otherDepth)
+    if (a >= DEPTH_BREAK_MIN_CENTER_FT) {
+      const strength: 'moderate' | 'strong' = grad.maxDiff > 10 ? 'strong' : 'strong'
+      depthBreakTag = {
+        type: 'depth_break',
+        strength,
+        description: `Depth break: ${a.toFixed(0)} ft → ${b.toFixed(0)} ft within ${DEPTH_BREAK_OFFSET_M} m`,
+      }
+    }
+  }
+
+  return { surviveFilter, depthBreakTag, shallowAtLowTide, deepWater }
+}
+
+/**
+ * Apply depth filtering + augmentation to a unit. Returns either an
+ * augmented unit (potentially with a new depth_break convergence tag) plus
+ * extra per-unit depth notes, or null when the filter excludes it.
+ */
+function applyDepthToUnit(
+  unit: ScoringUnit,
+  tideLevelAboveMLLWFt: number,
+  depthFilterMode: DepthFilterMode,
+): { unit: ScoringUnit; shallowAtLowTide: boolean; deepWater: boolean } | null {
+  const d = evaluateDepthForUnit(unit, tideLevelAboveMLLWFt, depthFilterMode)
+  if (!d.surviveFilter) return null
+  if (d.depthBreakTag) {
+    // Avoid double-tagging if a previous derivation already added one (the
+    // habitat-index cache is shared across recomputes).
+    const already = unit.convergence.some((t) => t.type === 'depth_break')
+    if (!already) {
+      return {
+        unit: { ...unit, convergence: [...unit.convergence, d.depthBreakTag] },
+        shallowAtLowTide: d.shallowAtLowTide,
+        deepWater: d.deepWater,
+      }
+    }
+  }
+  return { unit, shallowAtLowTide: d.shallowAtLowTide, deepWater: d.deepWater }
 }
 
 /**
@@ -361,7 +504,11 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
   const msg = e.data
 
   if (msg.type === 'init') {
-    await initHabitatIndex()
+    // Habitat + depth load in parallel. The depth grid is only ~957 KB so
+    // it lands well before the habitat indexing finishes; we don't block on
+    // its readiness — if it's still loading on first score pass, depth
+    // lookups return null and the filter degrades gracefully.
+    await Promise.all([initHabitatIndex(), initDepthGrid()])
     const reply: InitCompleteMessage = {
       type: 'init-complete',
       reqId: msg.reqId,
@@ -407,6 +554,9 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       pressureInHg: msg.pressureInHg,
       pressureTrendInHgPer3h: msg.pressureTrendInHgPer3h,
       frontalPhase: msg.frontalPhase,
+      // Step 13.6 depth context
+      tideLevelAboveMLLWFt: msg.tideLevelAboveMLLWFt,
+      depthFilterMode: msg.depthFilterMode,
     }
 
     const features = getVisibleHabitat(msg.bounds)
@@ -417,10 +567,42 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
     }
     const inView = filterUnitsToBounds(allUnits, msg.bounds)
 
-    const scored: ScoredEntry[] = inView.map((unit) => ({
-      unit,
-      result: scoreUnit(unit, ctx),
-    }))
+    // Step 13.6: apply depth filter + depth_break augmentation per unit.
+    const scored: ScoredEntry[] = []
+    let droppedToFilter = 0
+    for (const baseUnit of inView) {
+      const d = applyDepthToUnit(baseUnit, msg.tideLevelAboveMLLWFt, msg.depthFilterMode)
+      if (!d) {
+        droppedToFilter++
+        continue
+      }
+      const result = scoreUnit(d.unit, ctx)
+      // Tag_only mode + shallow → emit the warning factor (0 delta, just a
+      // popup line). Deep water gets a 0-delta info note in any mode.
+      if (d.shallowAtLowTide && msg.depthFilterMode === 'tag_only') {
+        result.missingFactors.push({
+          fired: false,
+          delta: 0,
+          description: 'Shallow at low tide — kayak access may dry up',
+          category: 'depth',
+        })
+      }
+      if (d.deepWater) {
+        result.missingFactors.push({
+          fired: false,
+          delta: 0,
+          description: 'Deep water — adjust to inshore species accordingly',
+          category: 'depth',
+        })
+      }
+      scored.push({ unit: d.unit, result })
+    }
+    if (droppedToFilter > 0) {
+      console.info(
+        `[scoring/worker] depth filter '${msg.depthFilterMode}' dropped ${droppedToFilter} shallow units ` +
+          `(tide ${msg.tideLevelAboveMLLWFt.toFixed(2)} ft above MLLW)`,
+      )
+    }
 
     // Cluster on the FULL scored set so heat zones reflect the real
     // distribution; only the per-dot list gets capped below.
@@ -527,6 +709,12 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
           msg.windDirectionCompass,
         )
 
+        // Step 13.6 per-window tide level — interpolated from the same
+        // multi-day predictions the main scoring pass uses. This is what
+        // makes "a unit might be too shallow now but fishable at high tide
+        // tomorrow" actually work in the day-conditions view.
+        const windowTideLevelFt = tideLevelAtFt(msg.tidePredictions, windowTime)
+
         const ctx: ScoringContext = {
           time: windowTime,
           tideState,
@@ -543,12 +731,16 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
           pressureInHg: env.pressureInHg,
           pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
           frontalPhase: env.frontalPhase,
+          tideLevelAboveMLLWFt: windowTideLevelFt,
+          depthFilterMode: msg.depthFilterMode,
         }
 
         let windowMax = 0
         let windowFires = 0
-        for (const u of inView) {
-          const r = scoreUnit(u, ctx)
+        for (const baseUnit of inView) {
+          const d = applyDepthToUnit(baseUnit, windowTideLevelFt, msg.depthFilterMode)
+          if (!d) continue
+          const r = scoreUnit(d.unit, ctx)
           if (r.score > windowMax) windowMax = r.score
           if (r.score >= 8) windowFires++
         }

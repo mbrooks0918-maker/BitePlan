@@ -46,7 +46,7 @@ export type HabitatFeature = {
  *  Each `type` counts as a distinct kind for the 2-different-types unlock
  *  gate in `scoring.ts`. */
 export type ConvergenceTag = {
-  type: 'point' | 'creek_mouth' | 'transition' | 'chokepoint' | 'confluence'
+  type: 'point' | 'creek_mouth' | 'transition' | 'chokepoint' | 'confluence' | 'depth_break'
   description: string
   strength: 'weak' | 'moderate' | 'strong'
 }
@@ -111,6 +111,17 @@ export type ScoringContext = {
   /** Frontal-passage phase derived from forecast keywords + pressure trend.
    *  Default 'stable' when no frontal signal is detected. */
   frontalPhase: 'pre' | 'during' | 'post' | 'stable'
+  // ----- Step 13.6 depth -----
+  /** Current water level above MLLW (ft) at the active station. Linearly
+   *  interpolated between the bracketing hi/lo events — an approximation
+   *  (real curves are sinusoidal); good enough for the kayak-navigability
+   *  threshold the depth filter cares about. */
+  tideLevelAboveMLLWFt: number
+  /** User-selected depth filter mode. 'strict' excludes any unit shallower
+   *  than the MLLW threshold; 'tide_aware' excludes only when current depth
+   *  (chart + tide level) is below the threshold; 'tag_only' shows all and
+   *  tags shallow ones in the popup. Default 'tide_aware'. */
+  depthFilterMode: 'strict' | 'tide_aware' | 'tag_only'
 }
 
 export type FactorCategory =
@@ -127,6 +138,8 @@ export type FactorCategory =
   | 'temperature'
   | 'pressure'
   | 'front'
+  // ----- Step 13.6 depth -----
+  | 'depth'
 
 export type ScoringFactor = {
   fired: boolean

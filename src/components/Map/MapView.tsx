@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
 import HabitatLayers from './HabitatLayers'
+import DepthContours from './DepthContours'
 import DevLayerPanel from './DevLayerPanel'
 import ScoredZones from './ScoredZones'
 import ScoringStatus from './ScoringStatus'
@@ -154,6 +155,7 @@ function MapView() {
           maxZoom={19}
         />
         <HabitatLayers />
+        <DepthContours />
         <ScoredZones />
         <NamedAnchors />
         <MapStateSync />

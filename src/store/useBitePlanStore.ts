@@ -14,6 +14,7 @@ import type { NamedAnchor } from '@/lib/anchors'
 import {
   assembleTideWindow,
   fetchTidePredictions,
+  tideLevelAtFt,
   type TidePrediction,
 } from '@/lib/tides'
 import {
@@ -39,6 +40,22 @@ const DEFAULT_ZOOM = 12
 const TRIP_AUTO_START_MS = new Date(2026, 4, 30, 0, 0, 0, 0).getTime() // May 30 00:00 local
 const TRIP_AUTO_END_MS = new Date(2026, 5, 15, 0, 0, 0, 0).getTime() // June 15 00:00 local (exclusive)
 const TRIP_STORAGE_KEY = 'trip:active' // per handoff doc storage keys
+
+// Step 13.6 — depth filter mode persistence.
+const DEPTH_FILTER_STORAGE_KEY = 'settings:depthFilter'
+export type DepthFilterMode = 'strict' | 'tide_aware' | 'tag_only'
+function loadDepthFilter(): DepthFilterMode {
+  try {
+    const raw = window.localStorage.getItem(DEPTH_FILTER_STORAGE_KEY)
+    if (raw === 'strict' || raw === 'tide_aware' || raw === 'tag_only') return raw
+  } catch {}
+  return 'tide_aware'
+}
+function saveDepthFilter(mode: DepthFilterMode): void {
+  try {
+    window.localStorage.setItem(DEPTH_FILTER_STORAGE_KEY, mode)
+  } catch {}
+}
 
 /**
  * Resolves whether Trip Mode is currently active. `override` comes from the
@@ -80,7 +97,10 @@ function saveTripOverride(value: boolean | null): void {
 // the cap; see the worker's tier-priority slicing.
 const MAX_SCORED_UNITS = 2000
 
-export type HabitatKey = 'seagrass' | 'oysters' | 'wetlands'
+// Step 13.6 added 'contours' alongside the original three habitat flags.
+// Treated as a habitat-like overlay for UI consistency with the dev panel,
+// though it's a depth visibility layer rather than a habitat feature.
+export type HabitatKey = 'seagrass' | 'oysters' | 'wetlands' | 'contours'
 export type HabitatFlags = Record<HabitatKey, boolean>
 
 export type ScoredEntry = { unit: ScoringUnit; result: ScoringResult }
@@ -128,6 +148,9 @@ type BitePlanState = {
   /** User override for Trip Mode. null = follow auto-window; true/false = manual. */
   tripModeOverride: boolean | null
 
+  // Step 13.6 depth integration
+  depthFilterMode: DepthFilterMode
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
@@ -137,6 +160,7 @@ type BitePlanState = {
   selectAnchor: (payload: NamedAnchor | null) => void
   setTimeMode: (mode: TimeMode) => void
   setTripModeOverride: (value: boolean | null) => void
+  setDepthFilterMode: (mode: DepthFilterMode) => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -191,6 +215,7 @@ function buildRequestSignature(
   species: Species,
   stationId: string,
   predictionsLen: number,
+  depthFilterMode: DepthFilterMode,
 ): string {
   return [
     bounds.west.toFixed(4),
@@ -201,6 +226,7 @@ function buildRequestSignature(
     species,
     stationId,
     predictionsLen,
+    depthFilterMode,
   ].join('|')
 }
 
@@ -253,8 +279,8 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   bounds: null,
   currentTime: new Date(),
 
-  habitatLayers: { seagrass: false, oysters: false, wetlands: false },
-  habitatLoading: { seagrass: false, oysters: false, wetlands: false },
+  habitatLayers: { seagrass: false, oysters: false, wetlands: false, contours: false },
+  habitatLoading: { seagrass: false, oysters: false, wetlands: false, contours: false },
 
   currentStation: getNearestStation(PERDIDO_BAY.lat, PERDIDO_BAY.lon),
   tidePredictions: [],
@@ -275,6 +301,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   dayConditions: [],
   dayConditionsLoading: false,
   tripModeOverride: loadTripOverride(),
+  depthFilterMode: loadDepthFilter(),
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -302,6 +329,13 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     set({ tripModeOverride: value })
     // Recompute will be triggered by the picker components when their
     // (startDate, dayCount) changes — no work here.
+  },
+  setDepthFilterMode: (mode) => {
+    saveDepthFilter(mode)
+    set({ depthFilterMode: mode })
+    // Filter mode affects which units survive the worker pass — kick a
+    // recompute so the dots update immediately.
+    get().recomputeScoredUnits()
   },
 
   toggleHabitat: (key) =>
@@ -355,12 +389,14 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     // Skip if a request with this exact context is already in flight. This
     // collapses the 3-4 cold-pass triggers (init-complete, tide-fetch-success,
     // initial moveend, invalidateSize moveend) into ONE worker pass.
+    const { depthFilterMode } = get()
     const sig = buildRequestSignature(
       bounds,
       currentTime,
       species,
       currentStation.id,
       tidePredictions.length,
+      depthFilterMode,
     )
     if (sig === inFlightSignature) return
     inFlightSignature = sig
@@ -373,6 +409,8 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     // Per-window context inside the worker (day-conditions, projection) will
     // re-derive these from the same packed arrays we ship below.
     const env = deriveCurrentEnv(currentWeather, currentTime)
+    // Step 13.6: interpolated water level above MLLW for the depth filter.
+    const tideLevelAboveMLLWFt = tideLevelAtFt(tidePredictions, currentTime)
 
     scoringWorker.postMessage({
       type: 'score',
@@ -392,6 +430,8 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
       frontalPhase: env.frontalPhase,
       airTempF: currentWeather?.current.temperatureF ?? 0,
+      tideLevelAboveMLLWFt,
+      depthFilterMode,
       maxUnits: MAX_SCORED_UNITS,
     })
   },
@@ -450,9 +490,12 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     const weather = get().currentWeather
     // For day conditions we use TODAY's current env as the carry-forward
     // fallback. The worker re-derives per-window env (water-temp estimate,
-    // pressure trend, frontal phase) when the packed pressure / hourly
-    // series cover the window time; otherwise it falls back to these.
+    // pressure trend, frontal phase, tide level) when the packed pressure /
+    // hourly / tide series cover the window time; otherwise it falls back
+    // to these.
     const env = deriveCurrentEnv(weather, startDate)
+    const fallbackTideLevelFt = tideLevelAtFt(tidePredictions, startDate)
+    const { depthFilterMode: dfm } = get()
     scoringWorker.postMessage({
       type: 'computeDayConditions',
       reqId,
@@ -472,6 +515,8 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
       frontalPhase: env.frontalPhase,
       airTempF: weather?.current.temperatureF ?? 0,
+      tideLevelAboveMLLWFt: fallbackTideLevelFt,
+      depthFilterMode: dfm,
     })
     void dayMs
   },

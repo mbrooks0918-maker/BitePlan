@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react'
 import { GeoJSON } from 'react-leaflet'
 import type { PathOptions } from 'leaflet'
 import type { FeatureCollection } from 'geojson'
-import { useBitePlanStore, type HabitatKey } from '@/store/useBitePlanStore'
+import { useBitePlanStore } from '@/store/useBitePlanStore'
+
+/** HabitatLayers handles only the three habitat polygon layers. The
+ *  Step-13.6 `contours` flag in HabitatKey is rendered by DepthContours
+ *  alongside us. Narrowing the local key type keeps the file's record
+ *  initializers honest. */
+type HabitatPolyKey = 'seagrass' | 'oysters' | 'wetlands'
 
 // Style spec per handoff doc — "UI: tier-color heat zones" → "Habitat layer toggles".
-const LAYER_STYLE: Record<HabitatKey, PathOptions> = {
+const LAYER_STYLE: Record<HabitatPolyKey, PathOptions> = {
   seagrass: { color: '#14b8a6', weight: 1, fillColor: '#14b8a6', fillOpacity: 0.30 },
   oysters:  { color: '#f59e0b', weight: 1, fillColor: '#f59e0b', fillOpacity: 0.40 },
   wetlands: { color: '#84cc16', weight: 1, fillColor: '#84cc16', fillOpacity: 0.25 },
@@ -13,11 +19,11 @@ const LAYER_STYLE: Record<HabitatKey, PathOptions> = {
 
 // Module-level cache so toggling a layer off then on doesn't refetch.
 // Persists across remounts within the same browser session.
-const cache = new Map<HabitatKey, FeatureCollection>()
+const cache = new Map<HabitatPolyKey, FeatureCollection>()
 // Tracks fetches already in flight so concurrent toggles don't double-fetch.
-const inFlight = new Map<HabitatKey, Promise<FeatureCollection>>()
+const inFlight = new Map<HabitatPolyKey, Promise<FeatureCollection>>()
 
-async function loadLayer(key: HabitatKey): Promise<FeatureCollection> {
+async function loadLayer(key: HabitatPolyKey): Promise<FeatureCollection> {
   const hit = cache.get(key)
   if (hit) return hit
   const pending = inFlight.get(key)
@@ -47,7 +53,7 @@ function HabitatLayers() {
   const setHabitatLoading = useBitePlanStore((s) => s.setHabitatLoading)
 
   // Per-layer data once fetched. null = not loaded yet.
-  const [data, setData] = useState<Record<HabitatKey, FeatureCollection | null>>(() => ({
+  const [data, setData] = useState<Record<HabitatPolyKey, FeatureCollection | null>>(() => ({
     seagrass: cache.get('seagrass') ?? null,
     oysters: cache.get('oysters') ?? null,
     wetlands: cache.get('wetlands') ?? null,
@@ -56,7 +62,7 @@ function HabitatLayers() {
   // Whenever a layer is toggled on for the first time, kick off its fetch.
   // The map paints satellite tiles immediately; the polygons appear when data lands.
   useEffect(() => {
-    const keys: HabitatKey[] = ['seagrass', 'oysters', 'wetlands']
+    const keys: HabitatPolyKey[] = ['seagrass', 'oysters', 'wetlands']
     for (const key of keys) {
       if (habitatLayers[key] && !cache.has(key)) {
         setHabitatLoading(key, true)
@@ -75,7 +81,7 @@ function HabitatLayers() {
 
   return (
     <>
-      {(['seagrass', 'oysters', 'wetlands'] as HabitatKey[]).map((key) => {
+      {(['seagrass', 'oysters', 'wetlands'] as HabitatPolyKey[]).map((key) => {
         if (!habitatLayers[key] || !data[key]) return null
         return (
           <GeoJSON

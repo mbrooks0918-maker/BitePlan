@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import type { ScoringContext, ScoringFactor, Tier } from '@/types'
 import { deriveCurrentEnv, useBitePlanStore, type ScoredEntry } from '@/store/useBitePlanStore'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
-import { dailyTideRange, getCurrentTideState } from '@/lib/tides'
+import { dailyTideRange, getCurrentTideState, tideLevelAtFt } from '@/lib/tides'
 import { getCachedProjection, type ProjectionResult } from '@/lib/projection'
 
 // Tier → header background + button background. Spec colors from handoff doc.
@@ -139,6 +139,8 @@ function ZonePopup() {
     const dailyTideRangeFt = dailyTideRange(tidePredictions, currentTime)
 
     const env = deriveCurrentEnv(currentWeather, currentTime)
+    const tideLevelAboveMLLWFt = tideLevelAtFt(tidePredictions, currentTime)
+    const { depthFilterMode } = useBitePlanStore.getState()
     const ctx: ScoringContext = {
       time: currentTime,
       tideState,
@@ -155,6 +157,8 @@ function ZonePopup() {
       pressureInHg: env.pressureInHg,
       pressureTrendInHgPer3h: env.pressureTrendInHgPer3h,
       frontalPhase: env.frontalPhase,
+      tideLevelAboveMLLWFt,
+      depthFilterMode,
     }
 
     getCachedProjection(selectedZone.unit, ctx, currentStation)
@@ -185,10 +189,12 @@ function ZonePopup() {
   const isLowTier = tier === 'driveby'
 
   // Convergence factors get their own popup sections — unlocking vs partial.
-  // Step 13.5 v2.1: chokepoints self-unlock; other subtypes still require
-  // ≥ 2 different tag types. Mirrors the gate in scoring.ts.
+  // Step 13.5 v2.1 + Step 13.6: chokepoints and depth_breaks self-unlock;
+  // other subtypes still require ≥ 2 different tag types. Mirrors the gate
+  // in scoring.ts.
   const tagTypes = new Set(unit.convergence.map((t) => t.type))
-  const isUnlocked = tagTypes.has('chokepoint') || tagTypes.size >= 2
+  const isUnlocked =
+    tagTypes.has('chokepoint') || tagTypes.has('depth_break') || tagTypes.size >= 2
   const convergenceFired = result.firedFactors.filter((f) => f.category === 'convergence')
   const convergenceMissing = result.missingFactors.filter((f) => f.category === 'convergence')
   const otherFiredFactors = result.firedFactors.filter((f) => f.category !== 'convergence')

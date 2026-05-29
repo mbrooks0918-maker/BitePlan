@@ -660,16 +660,17 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   // to clear driveby. Tags fire with delta 0 — they communicate "why this
   // score is allowed to climb", not "what's adding to it".
   //
-  // Step 13.5 v2.1 exception: CHOKEPOINTS SELF-UNLOCK. A chokepoint (pass /
-  // inlet) IS a fishing convergence by itself per the literature — flounder
-  // stack at chokepoints, bull reds run them on tidal flows. The 2-different-
-  // types rule incorrectly gated these out (open-water passes rarely carry
-  // adjacent creek mouths or habitat transitions). Other subtypes still
-  // require the 2-different-types rule to ensure "structure meets structure".
+  // Step 13.5 v2.1 + Step 13.6: CHOKEPOINTS AND DEPTH_BREAKS SELF-UNLOCK.
+  // Both are inherently fishing convergences per the literature —
+  // chokepoints stack flounder + run bull reds on tidal flows; depth
+  // breaks (channel edges, drop-offs, holes) hold every inshore species
+  // along the contour. The 2-different-types rule incorrectly gated these
+  // out when they appear alone. Other subtypes still require the
+  // 2-different-types rule to ensure "structure meets structure".
   const tagTypes = new Set(unit.convergence.map((t) => t.type))
-  const hasChokepoint = tagTypes.has('chokepoint')
+  const hasSelfUnlocker = tagTypes.has('chokepoint') || tagTypes.has('depth_break')
   const hasMultiConvergence = tagTypes.size >= 2
-  const isUnlocked = hasChokepoint || hasMultiConvergence
+  const isUnlocked = hasSelfUnlocker || hasMultiConvergence
 
   for (const tag of unit.convergence) {
     add(factor(true, 0, tag.description, 'convergence'))
@@ -692,6 +693,7 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
         onlyType === 'creek_mouth' ? 'creek mouth' :
         onlyType === 'transition' ? 'habitat transition' :
         onlyType === 'chokepoint' ? 'chokepoint' :
+        onlyType === 'depth_break' ? 'depth break' :
         'confluence'
       add(
         factor(
