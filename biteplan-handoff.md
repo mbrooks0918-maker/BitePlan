@@ -208,6 +208,38 @@ Use wind speed/direction and precipitation in scoring and in the conditions pane
 
 The heart of the app. No preloaded fishing spots. The engine scores habitat polygons and derived edges from FWC + USFWS data, in real time, at the current map view.
 
+### SCORING PHILOSOPHY: convergence over coverage (design directive, added during build)
+
+**This directive supersedes the simpler additive baseline below where the two conflict.** Anywhere the current scoring rules light up bare shoreline because "habitat present + good tide + good time" sums above the hot threshold, that's the model getting it wrong.
+
+**The problem the current model has.** The current scoring paints nearly every shoreline warm. The habitat baseline alone (seagrass / marsh / oyster +2) plus typical time / season / tide bonuses pushes almost any edge to hot tier on a good morning. That defeats the entire promise of the app — "Eliminate water. Find the bite." If every shoreline glows orange, we haven't eliminated anything; we've just colored the map.
+
+**The corrected philosophy.** A zone should only light up (yellow / orange / red) when habitat structure **CONVERGES** with a fish-holding feature. The features that matter:
+
+- A **point** or spit (convex shoreline inflection)
+- A **creek mouth** / **drainage mouth** (a narrow wetland-to-open-water connection)
+- A **depth change** or **contour break** (where shallow flats drop to channel)
+- A **cut** or **pass** (a tidal pinch point between bodies of water)
+- A **habitat transition** — one habitat type's edge meeting another's: oyster bar ON a grass edge, grass-to-sand seam, marsh edge dropping into open water, an AMRD reef sitting in a grass bed
+
+Bare, featureless shoreline — even prime habitat on a perfect rising tide at dawn during peak season — should stay dark or barely register. Less is more. The map's job is to ELIMINATE water, not paint it. Surface only the nuanced convergences most likely to hold fish, so the angler cuts their time spent checking marginal water.
+
+**Secondary benefit: pattern training.** The spots that light up are the convergences experienced anglers already look for instinctively. Making only those glow teaches the user's eye to read shoreline the way a veteran does. A novice opening BitePlan and seeing a red dot exactly at a creek mouth where the grass meets the channel edge is learning the heuristic, not just receiving the answer.
+
+**Implementation implications (to be addressed in a dedicated step, provisionally "Step 12.5: convergence scoring").** Do not modify scoring code based on this directive until that step is opened.
+
+- **Habitat baseline alone must not reach hot tier.** Raise the bar. A lone grass edge with nothing else going on should land in the low single digits (1–3), not a 6 or 7. The current +2 baseline for any habitat is too generous on its own.
+- **Add feature detection from available geometry.** The shapes are already in our data — we just aren't reading structure from them yet:
+  - Points / spits: detect convex inflections along a shoreline polyline (angle change above a threshold).
+  - Creek mouths / drainage mouths: detect narrow connections between a wetland polygon and open water (a wetland edge segment with open water on one side and wetland interior on the other, within a narrow corridor).
+  - Confluences / cuts: detect where two waterway polygons meet at a pinch point.
+  - Habitat-type transitions / adjacency: detect where one habitat's edge falls within a small radius of another habitat's edge (seagrass edge near oyster, marsh edge near seagrass, etc.).
+  - **Verified structure anchors:** the 4 AMRD reefs and the Pensacola Bay restoration anchors listed in the "Verified Data Inventory" are direct convergence points and should be ingested as first-class feature data, not derived from habitat polygons.
+- **Gating rule, not just an additive multiplier.** Tide / time / season / moon bonuses should largely apply ON TOP OF a detected feature, not lift bare shoreline by themselves. Strong candidate model: **a unit cannot exceed driveby tier unless at least one structural-feature factor fires.** Bare edges max out at drive-by no matter how the conditions line up; convergences scale all the way to fire with the conditions.
+- **Net visual target.** At any given good moment, a typical bay view should show a HANDFUL of orange / red convergence spots and mostly-dark water. Not a continuous warm ribbon along every shore. If a screenshot of the default Perdido Bay view still has miles of orange along the barrier islands, the model is still wrong.
+
+This directive is a North Star; the specific numbers and detection thresholds will be tuned during Step 12.5.
+
 ### Algorithm (runs on view change or time scrub)
 
 1. **Get visible habitat polygons** in current map bounds via spatial filter against loaded GeoJSON

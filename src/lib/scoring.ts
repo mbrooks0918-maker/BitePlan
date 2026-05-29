@@ -60,10 +60,11 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   const inMidday = nowMin >= MIDDAY_START_MIN && nowMin < MIDDAY_END_MIN
 
   // ----- 1) Habitat baseline ---------------------------------------------
-  // Every scoring unit in our impl is either a small whole polygon or a
-  // sampled edge point — both treated as "edge" for baseline purposes.
-  // (The handoff's "interior of large seagrass: +0" case never arises here
-  // because large polygons are sampled to edges, not scored as wholes.)
+  // Restored to +2 after Step 12.5 v2: the additive-convergence model failed
+  // (dense habitat overlap produced thousands of fires). New model is
+  // "convergence as unlock" — bare conditions sum naturally; without a
+  // convergence tag the final score is clamped to driveby (≤ 4); with one
+  // the natural sum applies. So we want the original magnitudes back.
   if (unit.habitatType === 'seagrass') {
     add(factor(true, 2, 'Seagrass edge', 'habitat'))
   } else if (unit.habitatType === 'oyster') {
@@ -243,8 +244,45 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
     add(factor(false, 0, `Moderate tide range (${r.toFixed(1)} ft)`, 'tide'))
   }
 
+  // ----- 9) Convergence (Step 12.5 v2: UNLOCK, not bonus) ----------------
+  //
+  // Per the "convergence over coverage" directive, structural features
+  // (points, creek/drainage mouths, habitat transitions) decide whether a
+  // spot is even worth fishing — not how high it scores. So convergence
+  // tags are surfaced as fired factors with **zero delta** (they don't add
+  // to the score) but they UNLOCK the gate: a unit with at least one tag
+  // takes the natural sum; a unit with none gets clamped to driveby (≤ 4)
+  // no matter how perfect the conditions are.
+  //
+  // The factor entries still appear in the popup so the angler sees WHY
+  // the spot is allowed to score above driveby ("Marsh point/spit (strong)
+  // — structural feature").
+  for (const tag of unit.convergence) {
+    add(factor(true, 0, `${tag.description} — structural feature`, 'convergence'))
+  }
+
+  // If the unit has NO convergence tags, surface that explicitly so the
+  // capped score doesn't look like a bug to anyone reading the popup.
+  if (unit.convergence.length === 0) {
+    add(
+      factor(
+        false,
+        0,
+        'No structural feature (point/creek/transition) — capped at driveby',
+        'convergence',
+      ),
+    )
+  }
+
   // ----- Final tally ------------------------------------------------------
-  const score = Math.max(0, Math.min(10, total))
+  // The GATING RULE: a unit with no convergence factor cannot exceed 4.0
+  // (driveby's upper edge). A unit with at least one convergence tag uses
+  // the natural sum. Math note: convergence factors have delta 0, so the
+  // sum is identical to what it would be without the tags — the tags only
+  // affect WHETHER the cap applies.
+  let score = Math.max(0, Math.min(10, total))
+  const hasConvergence = unit.convergence.length > 0
+  if (!hasConvergence) score = Math.min(score, 4.0)
   const tier = tierFor(score)
 
   return {

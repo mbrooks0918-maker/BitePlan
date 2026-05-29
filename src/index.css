@@ -168,3 +168,29 @@
   background: transparent !important;
   pointer-events: none;
 }
+
+/* ------------------------------------------------------------------
+ * Named-anchor pins (Step 12.5).
+ *
+ * Cyan/violet/etc. SVG icons on a dark translucent disc so they stay
+ * legible over both bright satellite areas (sand, urban) and dark water.
+ * ------------------------------------------------------------------ */
+
+.biteplan-anchor-marker {
+  background: transparent !important;
+}
+.biteplan-anchor-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  background: rgba(2, 6, 23, 0.7);
+  padding: 5px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.biteplan-anchor-icon svg {
+  width: 100%;
+  height: 100%;
+}

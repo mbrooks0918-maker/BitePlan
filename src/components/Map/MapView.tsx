@@ -7,6 +7,8 @@ import DevLayerPanel from './DevLayerPanel'
 import ScoredZones from './ScoredZones'
 import ScoringStatus from './ScoringStatus'
 import ZonePopup from './ZonePopup'
+import NamedAnchors from './NamedAnchors'
+import AnchorPopup from './AnchorPopup'
 import TideReadout from '@/components/BottomSheet/TideReadout'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
 import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
@@ -140,6 +142,7 @@ function MapView() {
         />
         <HabitatLayers />
         <ScoredZones />
+        <NamedAnchors />
         <MapStateSync />
         <InvalidateSizeOnMount />
       </MapContainer>
@@ -154,6 +157,7 @@ function MapView() {
         <DayPickerStrip />
       )}
       <ZonePopup />
+      <AnchorPopup />
     </>
   )
 }

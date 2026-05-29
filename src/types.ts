@@ -32,6 +32,15 @@ export type HabitatFeature = {
   properties: Record<string, unknown>
 }
 
+/** Structural-feature tag attached to a scoring unit. The convergence-scoring
+ *  philosophy (Step 12.5, see handoff doc) gates units out of hot/fire tiers
+ *  unless they carry at least one of these tags. */
+export type ConvergenceTag = {
+  type: 'point' | 'creek_mouth' | 'transition'
+  description: string
+  strength: 'weak' | 'moderate' | 'strong'
+}
+
 /** What the scoring engine actually scores: either a small whole polygon
  *  or a sampled edge point off a large polygon's boundary. */
 export type ScoringUnit = {
@@ -42,6 +51,9 @@ export type ScoringUnit = {
   /** [lon, lat] — used as the visual location for clustering and popups. */
   centroid: [number, number]
   parentFeatureId: string
+  /** Detected structural features at or near this unit's centroid. Empty
+   *  array means "bare habitat" → scoring engine caps at driveby. */
+  convergence: ConvergenceTag[]
 }
 
 /** Visible-bounds query envelope (matches Leaflet/turf bbox convention). */
@@ -81,6 +93,7 @@ export type FactorCategory =
   | 'wind'
   | 'season'
   | 'depth'
+  | 'convergence'
 
 export type ScoringFactor = {
   fired: boolean

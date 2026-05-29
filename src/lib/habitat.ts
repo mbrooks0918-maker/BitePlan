@@ -20,7 +20,8 @@ import type {
   MultiPolygon,
   Polygon,
 } from 'geojson'
-import type { Bounds, HabitatFeature, HabitatType, ScoringUnit } from '@/types'
+import type { Bounds, ConvergenceTag, HabitatFeature, HabitatType, ScoringUnit } from '@/types'
+import { buildConvergenceContext, type ConvergenceContext } from '@/lib/convergence'
 
 const SOURCES: Array<{ url: string; type: HabitatType }> = [
   { url: '/data/seagrass.geojson', type: 'seagrass' },
@@ -46,6 +47,7 @@ type IndexedItem = {
 const tree = new RBush<IndexedItem>()
 let initPromise: Promise<void> | null = null
 let initialized = false
+let convergenceCtx: ConvergenceContext | null = null
 
 const derivationCache = new Map<string, ScoringUnit[]>()
 
@@ -99,9 +101,22 @@ export async function initHabitatIndex(): Promise<void> {
       }
     }
     tree.load(items)
+    const tIndex = (performance.now() - t0).toFixed(0)
+    console.info(`[habitat] indexed ${items.length} features in ${tIndex}ms`)
+
+    // Convergence detection (Step 12.5) — one-shot pass that tags points,
+    // creek mouths, and (lazily, at derive time) habitat transitions.
+    const tC0 = performance.now()
+    convergenceCtx = buildConvergenceContext(all)
+    const tC = (performance.now() - tC0).toFixed(0)
+    console.info(
+      `[habitat] convergence: ${convergenceCtx.pointStats.tags} point tags from ` +
+        `${convergenceCtx.pointStats.features} features, ` +
+        `${convergenceCtx.mouthStats.tags} mouth tags from ${convergenceCtx.mouthStats.features} features ` +
+        `(${tC} ms)`,
+    )
+
     initialized = true
-    const ms = (performance.now() - t0).toFixed(0)
-    console.info(`[habitat] indexed ${items.length} features in ${ms}ms`)
   })()
   return initPromise
 }
@@ -144,6 +159,32 @@ function centroidOf(geometry: Geometry): [number, number] {
   return [coords[0], coords[1]]
 }
 
+// Convergence transition query — finds nearby habitat features of a DIFFERENT
+// type to the queried unit's habitat. Used at derive time by ConvergenceContext.
+function habitatTreeQuery(
+  centroid: [number, number],
+  radiusM: number,
+  excludeType: HabitatType,
+): HabitatType[] {
+  const [lon, lat] = centroid
+  const dLat = radiusM / 111_000
+  const dLon = radiusM / (111_000 * Math.cos((lat * Math.PI) / 180))
+  const hits = tree.search({
+    minX: lon - dLon, maxX: lon + dLon,
+    minY: lat - dLat, maxY: lat + dLat,
+  })
+  const types = new Set<HabitatType>()
+  for (const h of hits) {
+    if (h.feature.type !== excludeType) types.add(h.feature.type)
+  }
+  return Array.from(types)
+}
+
+function tagsFor(centroid: [number, number], habitatType: HabitatType): ConvergenceTag[] {
+  if (!convergenceCtx) return []
+  return convergenceCtx.tagUnit(centroid, habitatType, habitatTreeQuery)
+}
+
 /**
  * For each outer ring of `feature`, produce either a single 'polygon' unit
  * (small ring) or one 'edge_point' unit per ~30 m of perimeter (large ring).
@@ -168,13 +209,15 @@ export function deriveScoringUnits(feature: HabitatFeature): ScoringUnit[] {
 
     if (area < SMALL_POLYGON_SQM) {
       const subPoly = turf.polygon([ring])
+      const centroid = centroidOf(subPoly.geometry)
       units.push({
         id: `${feature.id}:p${polyIdx}`,
         unitType: 'polygon',
         habitatType: feature.type,
         geometry: subPoly.geometry,
-        centroid: centroidOf(subPoly.geometry),
+        centroid,
         parentFeatureId: feature.id,
+        convergence: tagsFor(centroid, feature.type),
       })
     } else {
       const line = turf.lineString(ring)
@@ -190,6 +233,7 @@ export function deriveScoringUnits(feature: HabitatFeature): ScoringUnit[] {
           geometry: pt.geometry,
           centroid: [lon, lat],
           parentFeatureId: feature.id,
+          convergence: tagsFor([lon, lat], feature.type),
         })
         pointIdx++
       }

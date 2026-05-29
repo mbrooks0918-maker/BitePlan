@@ -10,6 +10,7 @@ import type {
   TimeMode,
 } from '@/types'
 import { getNearestStation, type Station } from '@/lib/stations'
+import type { NamedAnchor } from '@/lib/anchors'
 import {
   assembleTideWindow,
   fetchTidePredictions,
@@ -99,6 +100,9 @@ type BitePlanState = {
   // The unit currently shown in the zone popup, or null when the popup is
   // dismissed. Set by clicking a heat zone polygon or an individual dot.
   selectedZone: ScoredEntry | null
+  // The named anchor (verified reef / restoration / launch) currently shown
+  // in the anchor popup, or null. These are identity pins, not scoring.
+  selectedAnchor: NamedAnchor | null
 
   // Time strip mode + 7-day picker data. dayConditions is the precomputed
   // per-day summary the picker reads; dayCount is parameterized so Step 12
@@ -115,6 +119,7 @@ type BitePlanState = {
   setCurrentTime: (currentTime: Date) => void
   setSpecies: (species: Species) => void
   selectZone: (payload: ScoredEntry | null) => void
+  selectAnchor: (payload: NamedAnchor | null) => void
   setTimeMode: (mode: TimeMode) => void
   setTripModeOverride: (value: boolean | null) => void
   toggleHabitat: (key: HabitatKey) => void
@@ -246,6 +251,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   lastScoringMs: 0,
   habitatIndexReady: false,
   selectedZone: null,
+  selectedAnchor: null,
 
   timeMode: '24h',
   dayConditions: [],
@@ -264,6 +270,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   },
   setSpecies: (species) => set({ species }),
   selectZone: (payload) => set({ selectedZone: payload }),
+  selectAnchor: (payload) => set({ selectedAnchor: payload }),
   setTimeMode: (mode) => {
     set({ timeMode: mode })
     // Lazy-trigger day-conditions compute the first time the picker is shown
