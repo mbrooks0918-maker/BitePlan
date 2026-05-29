@@ -37,6 +37,7 @@ const TOAST_MS = 4_000
 function LocateButton() {
   const status = useBitePlanStore((s) => s.locationStatus)
   const loc = useBitePlanStore((s) => s.userLocation)
+  const onWater = useBitePlanStore((s) => s.onWaterMode)
   const map = useMap()
 
   const [toast, setToast] = useState<string | null>(null)
@@ -117,9 +118,11 @@ function LocateButton() {
         // occupy. Sits above the Leaflet zoom controls (z 800-1000) so the
         // user can always reach it.
         className={
-          'fixed top-4 right-4 z-[1000] size-12 rounded-full shadow-lg ' +
+          'fixed top-4 right-4 z-[1000] rounded-full shadow-lg ' +
           'flex items-center justify-center backdrop-blur-sm ' +
-          'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ' +
+          'transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ' +
+          // Step 18: 56px in On-Water Mode for easier thumb operation.
+          (onWater ? 'size-14 ' : 'size-12 ') +
           bg
         }
       >

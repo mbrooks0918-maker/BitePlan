@@ -88,6 +88,10 @@ function formatProjectionLine(p: ProjectionResult): string {
 function ZonePopup() {
   const selectedZone = useBitePlanStore((s) => s.selectedZone)
   const selectZone = useBitePlanStore((s) => s.selectZone)
+  // Step 18 — in On-Water Mode the popup auto-dismisses after 6s so the
+  // angler doesn't have to one-hand-tap to close. Any interaction with
+  // the card (scroll, hover, tap) cancels the timer.
+  const onWater = useBitePlanStore((s) => s.onWaterMode)
   // Hour-bucket the currentTime so projection re-runs at most once per hour
   // when the popup is open and the user scrubs the time slider across the
   // hour boundary.
@@ -111,6 +115,28 @@ function ZonePopup() {
   useEffect(() => {
     if (selectedZone) closeButtonRef.current?.focus()
   }, [selectedZone])
+
+  // Step 18 — On-Water Mode auto-dismiss. Starts a 6-second timer when
+  // the popup opens; any pointer / wheel / keypress on the card cancels
+  // the timer so a user who's mid-read isn't yanked out of it.
+  const autoDismissTimerRef = useRef<number | null>(null)
+  const cancelAutoDismiss = (): void => {
+    if (autoDismissTimerRef.current != null) {
+      window.clearTimeout(autoDismissTimerRef.current)
+      autoDismissTimerRef.current = null
+    }
+  }
+  useEffect(() => {
+    if (!selectedZone || !onWater) {
+      cancelAutoDismiss()
+      return
+    }
+    autoDismissTimerRef.current = window.setTimeout(() => {
+      autoDismissTimerRef.current = null
+      selectZone(null)
+    }, 6_000)
+    return cancelAutoDismiss
+  }, [selectedZone, onWater, selectZone])
 
   // Escape key dismisses.
   useEffect(() => {
@@ -280,8 +306,18 @@ function ZonePopup() {
         aria-modal="true"
         aria-labelledby={titleId}
         // The card stops backdrop clicks from bubbling out and dismissing.
-        onClick={(e) => e.stopPropagation()}
-        onTouchStart={onTouchStart}
+        // It also cancels the On-Water auto-dismiss timer on any
+        // interaction (per spec).
+        onClick={(e) => {
+          e.stopPropagation()
+          cancelAutoDismiss()
+        }}
+        onWheel={cancelAutoDismiss}
+        onScroll={cancelAutoDismiss}
+        onTouchStart={(e) => {
+          cancelAutoDismiss()
+          onTouchStart(e)
+        }}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         className="absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-slate-900 text-slate-100 rounded-t-2xl shadow-2xl overflow-hidden"

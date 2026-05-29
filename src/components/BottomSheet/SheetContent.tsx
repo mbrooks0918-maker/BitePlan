@@ -67,6 +67,52 @@ function ModeToggle() {
   )
 }
 
+/**
+ * Settings section (Step 18) — real toggles live here now. Currently
+ * exposes On-Water Mode; About / On-Water tutorial / preference options
+ * land in a later step.
+ */
+function SettingsSection() {
+  const onWater = useBitePlanStore((s) => s.onWaterMode)
+  const setOnWater = useBitePlanStore((s) => s.setOnWaterMode)
+  return (
+    <section aria-label="Settings" className="mt-4">
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 px-1">
+        Settings
+      </div>
+      <div className="rounded-md bg-slate-800/40 border border-slate-800 divide-y divide-slate-800">
+        <div className="px-3 py-3 flex items-start justify-between gap-3 min-h-[56px]">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-100">On-Water Mode</div>
+            <div className="text-xs text-slate-400 mt-0.5 leading-snug">
+              One-thumb sun-readable layout for the kayak: giant tide pill,
+              Save Waypoint anchored to GPS.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onWater}
+            onClick={() => setOnWater(!onWater)}
+            className={
+              'shrink-0 mt-0.5 inline-flex h-6 w-11 items-center rounded-full transition-colors ' +
+              (onWater ? 'bg-blue-600' : 'bg-slate-700')
+            }
+          >
+            <span
+              aria-hidden
+              className={
+                'inline-block size-5 rounded-full bg-white transition-transform ' +
+                (onWater ? 'translate-x-5' : 'translate-x-0.5')
+              }
+            />
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function SheetContent() {
   const snap = useBitePlanStore((s) => s.sheetSnapPoint)
   const timeMode = useBitePlanStore((s) => s.timeMode)
@@ -123,14 +169,7 @@ function SheetContent() {
         <div className="space-y-4 pt-2">
           <LayerToggles />
           <WaypointsList />
-          <section aria-label="Settings" className="mt-4">
-            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 px-1">
-              Settings
-            </div>
-            <div className="rounded-md bg-slate-800/30 border border-slate-800 px-3 py-3 text-xs text-slate-400">
-              Settings: On-Water Mode, About — coming soon.
-            </div>
-          </section>
+          <SettingsSection />
           {/* Bottom padding so the last row clears the safe-area inset
               and the scroll feels finished. */}
           <div className="h-4" aria-hidden />

@@ -73,6 +73,35 @@ function saveSheetSnap(s: SheetSnapPoint): void {
 // unit; 'fire+' keeps fires only; 'hot+' keeps hot + fire.
 export type TierFilter = 'all' | 'fire+' | 'hot+'
 
+// Step 18 — On-Water Mode persistence.
+const ONWATER_STORAGE_KEY = 'settings:onWater'
+function loadOnWaterMode(): boolean {
+  try {
+    return window.localStorage.getItem(ONWATER_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+function saveOnWaterMode(v: boolean): void {
+  try {
+    if (v) window.localStorage.setItem(ONWATER_STORAGE_KEY, 'true')
+    else window.localStorage.removeItem(ONWATER_STORAGE_KEY)
+  } catch {}
+}
+const ONWATER_PROMPT_DISMISS_KEY = 'settings:onWaterPromptDismissed'
+function loadOnWaterPromptDismissed(): boolean {
+  try {
+    return window.sessionStorage.getItem(ONWATER_PROMPT_DISMISS_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+function saveOnWaterPromptDismissed(): void {
+  try {
+    window.sessionStorage.setItem(ONWATER_PROMPT_DISMISS_KEY, 'true')
+  } catch {}
+}
+
 // Step 13.6 — depth filter mode persistence.
 const DEPTH_FILTER_STORAGE_KEY = 'settings:depthFilter'
 export type DepthFilterMode = 'strict' | 'tide_aware' | 'tag_only'
@@ -221,6 +250,18 @@ type BitePlanState = {
    *  view away from wherever the user has panned. */
   hasAutoCenteredOnUser: boolean
 
+  // Step 18 — On-Water Mode.
+  /** Whether the one-thumb sun-readable layout is active. Persisted to
+   *  `settings:onWater` so the user reopens in the mode they left in. */
+  onWaterMode: boolean
+  /** True for the rest of the SESSION (sessionStorage) once the user
+   *  taps "Not now" on the auto-prompt, so we don't pester them. */
+  onWaterAutoPromptDismissed: boolean
+  /** Captures the sheet snap point at the moment On-Water Mode is enabled
+   *  so we can restore it cleanly on exit. Null when not in On-Water Mode
+   *  or when the snap wasn't restored from a prior entry. */
+  sheetSnapBeforeOnWater: SheetSnapPoint | null
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
@@ -269,6 +310,10 @@ type BitePlanState = {
   markAutoCentered: () => void
   /** Called when the user explicitly stops tracking. Clears the dot. */
   clearUserLocation: () => void
+
+  /** Step 18 actions. */
+  setOnWaterMode: (v: boolean) => void
+  dismissOnWaterPrompt: () => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -424,6 +469,9 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   locationWatchActive: false,
   onWaterCandidate: false,
   hasAutoCenteredOnUser: false,
+  onWaterMode: loadOnWaterMode(),
+  onWaterAutoPromptDismissed: loadOnWaterPromptDismissed(),
+  sheetSnapBeforeOnWater: null,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -547,6 +595,35 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       onWaterCandidate: false,
       hasAutoCenteredOnUser: false,
     }),
+  setOnWaterMode: (v) => {
+    saveOnWaterMode(v)
+    if (v) {
+      const cur = get()
+      // Snapshot the current snap point so we can restore it on exit.
+      // Then collapse to peek (the sheet's translateY off-screen rule is
+      // applied in BottomSheet.tsx based on onWaterMode).
+      set({
+        onWaterMode: true,
+        sheetSnapBeforeOnWater: cur.sheetSnapPoint,
+        sheetSnapPoint: 'peek',
+      })
+    } else {
+      const cur = get()
+      const restore = cur.sheetSnapBeforeOnWater ?? 'half'
+      set({
+        onWaterMode: false,
+        sheetSnapPoint: restore,
+        sheetSnapBeforeOnWater: null,
+      })
+      // Mirror to the sheet's snap-storage so a reload keeps the snap
+      // the user explicitly restored to.
+      saveSheetSnap(restore)
+    }
+  },
+  dismissOnWaterPrompt: () => {
+    saveOnWaterPromptDismissed()
+    set({ onWaterAutoPromptDismissed: true })
+  },
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

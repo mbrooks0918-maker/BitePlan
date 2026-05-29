@@ -50,6 +50,10 @@ type Props = {
 function BottomSheet({ children }: Props) {
   const snap = useBitePlanStore((s) => s.sheetSnapPoint)
   const setSnap = useBitePlanStore((s) => s.setSheetSnapPoint)
+  // Step 18: hide the sheet entirely (translate off-screen + opacity 0)
+  // when On-Water Mode is active. We keep it mounted so internal state
+  // — slider position, scroll position, etc. — is preserved.
+  const onWater = useBitePlanStore((s) => s.onWaterMode)
 
   // Lazy-mount flag for Full-only content. Flipped once on first reach.
   const [everOpenedFull, setEverOpenedFull] = useState(snap === 'full')
@@ -193,10 +197,17 @@ function BottomSheet({ children }: Props) {
         'fixed inset-x-0 bottom-0 z-30 mx-auto w-full sm:max-w-[480px] ' +
         'bg-slate-900 text-slate-100 rounded-t-2xl shadow-2xl ' +
         'border-t border-slate-700/60 ' +
-        'transition-[height] duration-200 ease-out overflow-hidden ' +
+        'transition-[height,transform,opacity] duration-200 ease-out overflow-hidden ' +
         'flex flex-col'
       }
-      style={{ height: `${SNAP_HEIGHTS[snap]}vh` }}
+      style={{
+        height: `${SNAP_HEIGHTS[snap]}vh`,
+        // On-Water Mode: slide off-screen + fade. Pointer events off so
+        // taps go through to the map below.
+        transform: onWater ? 'translateY(100%)' : undefined,
+        opacity: onWater ? 0 : undefined,
+        pointerEvents: onWater ? 'none' : undefined,
+      }}
     >
       {/* Header strip — the drag target. The grab handle pill in the centre
           gives the user a visual affordance; the entire row accepts pointer
