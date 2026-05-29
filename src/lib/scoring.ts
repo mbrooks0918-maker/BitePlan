@@ -221,17 +221,21 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   }
 
   // ----- 7) Wind ----------------------------------------------------------
-  // Note: until Step 13 wires NWS, ctx.windSpeedKt is always 0. That falls
-  // into the "<10 kt — calm" bucket, which is the correct default.
+  // Step 13 wires real NWS observed wind into ctx.windSpeedKt and an
+  // optional ctx.windDirectionCompass for display. Pre-Step-13 callers
+  // (and weather-unavailable fallbacks) pass 0 kt with no direction, which
+  // reads as "calm" — neutral.
   const w = ctx.windSpeedKt
+  const dirSuffix = ctx.windDirectionCompass ? ` ${ctx.windDirectionCompass}` : ''
   if (w < 10) {
-    add(factor(false, 0, `Wind ${w.toFixed(0)} kt — calm`, 'wind'))
+    const label = w < 3 ? 'calm' : 'light wind'
+    add(factor(false, 0, `Wind ${w.toFixed(0)} kt${dirSuffix} — ${label}`, 'wind'))
   } else if (w <= 15) {
-    add(factor(false, -0.5, `Wind ${w.toFixed(0)} kt — mild chop`, 'wind'))
+    add(factor(false, -0.5, `Wind ${w.toFixed(0)} kt${dirSuffix} — light chop`, 'wind'))
   } else if (w <= 20) {
-    add(factor(false, -1, `Wind ${w.toFixed(0)} kt — choppy`, 'wind'))
+    add(factor(false, -1, `Wind ${w.toFixed(0)} kt${dirSuffix} — choppy`, 'wind'))
   } else {
-    add(factor(false, -2, `Wind ${w.toFixed(0)} kt — rough`, 'wind'))
+    add(factor(false, -2, `Wind ${w.toFixed(0)} kt${dirSuffix} — blown out`, 'wind'))
   }
 
   // ----- 8) Daily tide range ---------------------------------------------

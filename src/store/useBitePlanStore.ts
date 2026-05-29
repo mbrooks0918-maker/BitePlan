@@ -16,6 +16,7 @@ import {
   fetchTidePredictions,
   type TidePrediction,
 } from '@/lib/tides'
+import { fetchWeather, type HourlyPeriod, type WeatherSnapshot } from '@/lib/weather'
 import type { WorkerToMain } from '@/workers/scoring.worker'
 
 const PERDIDO_BAY: LatLon = { lat: 30.317, lon: -87.436 }
@@ -89,6 +90,12 @@ type BitePlanState = {
   tidePredictions: TidePrediction[]
   tideLoading: boolean
 
+  // NWS weather snapshot for the current map center (rounded for cache hits).
+  // null until first fetch resolves, or when the network failed and no cache
+  // was available — scoring degrades to wind=0 in that case.
+  currentWeather: WeatherSnapshot | null
+  weatherLoading: boolean
+
   // Scoring
   species: Species
   scoredUnits: ScoredEntry[]
@@ -125,6 +132,7 @@ type BitePlanState = {
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
+  updateWeather: (mapCenter: LatLon) => Promise<void>
   recomputeScoredUnits: () => void
   /**
    * Compute per-day conditions for `dayCount` consecutive days starting at
@@ -243,6 +251,8 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   currentStation: getNearestStation(PERDIDO_BAY.lat, PERDIDO_BAY.lon),
   tidePredictions: [],
   tideLoading: true,
+  currentWeather: null,
+  weatherLoading: true,
 
   species: 'all',
   scoredUnits: [],
@@ -311,12 +321,25 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     }
   },
 
+  updateWeather: async (mapCenter) => {
+    set({ weatherLoading: true })
+    try {
+      const snapshot = await fetchWeather(mapCenter.lat, mapCenter.lon)
+      set({ currentWeather: snapshot, weatherLoading: false })
+      // Real wind data → re-score so the wind factor reflects observed value.
+      get().recomputeScoredUnits()
+    } catch (e) {
+      console.error('[store] updateWeather failed:', e)
+      set({ weatherLoading: false })
+    }
+  },
+
   /**
    * Send the current view + scoring context to the worker. The response
    * arrives asynchronously via the module-scope onmessage handler.
    */
   recomputeScoredUnits: () => {
-    const { bounds, currentTime, currentStation, tidePredictions, species, habitatIndexReady } =
+    const { bounds, currentTime, currentStation, tidePredictions, species, habitatIndexReady, currentWeather } =
       get()
     if (!habitatIndexReady) return
     if (!bounds) return
@@ -347,7 +370,9 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       stationLon: currentStation.lon,
       tidePredictions,
       species,
-      windSpeedKt: 0, // Step 13 wires this from NWS
+      windSpeedKt: currentWeather?.current.speedKt ?? 0,
+      windDirectionCompass: currentWeather?.current.directionCompass,
+      hourlyWind: currentWeather?.hourly.map(packHourly) ?? [],
       maxUnits: MAX_SCORED_UNITS,
     })
   },
@@ -403,6 +428,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     const reqId = nextReqId++
     latestDayConditionsReqId = reqId
 
+    const weather = get().currentWeather
     scoringWorker.postMessage({
       type: 'computeDayConditions',
       reqId,
@@ -413,8 +439,21 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
       stationLon: currentStation.lon,
       tidePredictions,
       species,
-      windSpeedKt: 0,
+      windSpeedKt: weather?.current.speedKt ?? 0,
+      windDirectionCompass: weather?.current.directionCompass,
+      hourlyWind: weather?.hourly.map(packHourly) ?? [],
     })
     void dayMs
   },
 }))
+
+// Compact form of HourlyPeriod for transmission to the worker — drops fields
+// the scoring engine doesn't need (forecast text, temperature, precip).
+function packHourly(p: HourlyPeriod) {
+  return {
+    startMs: p.startMs,
+    endMs: p.endMs,
+    windSpeedKt: p.windSpeedKt,
+    windDirectionCompass: p.windDirectionCompass,
+  }
+}

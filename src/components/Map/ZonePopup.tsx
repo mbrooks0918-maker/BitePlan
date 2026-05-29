@@ -133,7 +133,7 @@ function ZonePopup() {
     setProjection({ status: 'loading' })
 
     const state = useBitePlanStore.getState()
-    const { currentTime, currentStation, tidePredictions, species } = state
+    const { currentTime, currentStation, tidePredictions, species, currentWeather } = state
     const { state: tideState } = getCurrentTideState(tidePredictions, currentTime)
     const { sunrise, sunset } = getSunTimes(currentTime, currentStation.lat, currentStation.lon)
     const dailyTideRangeFt = dailyTideRange(tidePredictions, currentTime)
@@ -145,7 +145,8 @@ function ZonePopup() {
       moonIllumination: getMoonIllumination(currentTime),
       sunrise,
       sunset,
-      windSpeedKt: 0, // Step 13 wires this
+      windSpeedKt: currentWeather?.current.speedKt ?? 0,
+      windDirectionCompass: currentWeather?.current.directionCompass,
       dailyTideRangeFt,
       month: currentTime.getMonth() + 1,
       hour: currentTime.getHours(),

@@ -17,6 +17,8 @@ import {
   getCurrentTideState,
   type TidePrediction,
 } from '@/lib/tides'
+import { hourlyAt } from '@/lib/weather'
+import { useBitePlanStore } from '@/store/useBitePlanStore'
 import { getMoonIllumination, getSunTimes } from '@/lib/moon'
 import { scoreUnit } from '@/lib/scoring'
 import type { Station } from '@/lib/stations'
@@ -166,6 +168,14 @@ export async function projectNextFireWindow(
     const { state: tideState } = getCurrentTideState(allEvents, windowTime)
     const { sunrise, sunset } = getSunTimes(windowTime, station.lat, station.lon)
 
+    // Per-window wind from the NWS hourly forecast where it exists. Beyond
+    // the forecast's ~7-day horizon, fall back to the current observed wind
+    // (carry-forward approximation — same model the worker uses).
+    const weather = useBitePlanStore.getState().currentWeather
+    const matchedHourly = weather ? hourlyAt(weather, windowTime.getTime()) : null
+    const windKt = matchedHourly?.windSpeedKt ?? currentCtx.windSpeedKt
+    const windDir = matchedHourly?.windDirectionCompass ?? currentCtx.windDirectionCompass
+
     const ctx: ScoringContext = {
       time: windowTime,
       tideState,
@@ -173,9 +183,8 @@ export async function projectNextFireWindow(
       moonIllumination: getMoonIllumination(windowTime),
       sunrise,
       sunset,
-      // No future wind forecast yet — Step 13 only fills "now". Best-effort
-      // is to assume conditions stay roughly like the current moment.
-      windSpeedKt: currentCtx.windSpeedKt,
+      windSpeedKt: windKt,
+      windDirectionCompass: windDir,
       dailyTideRangeFt: dailyTideRange(allEvents, windowTime),
       month: windowTime.getMonth() + 1,
       hour: windowTime.getHours(),

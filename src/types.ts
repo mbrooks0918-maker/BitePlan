@@ -74,8 +74,12 @@ export type ScoringContext = {
   moonIllumination: number
   sunrise: Date
   sunset: Date
-  /** Wind speed in knots. Until Step 13 wires NWS, this is 0. */
+  /** Wind speed in knots. */
   windSpeedKt: number
+  /** 8-point compass label for wind (N / NE / E / SE / S / SW / W / NW),
+   *  shown alongside speed in the scoring popup. Optional; absent when
+   *  weather hasn't loaded yet. */
+  windDirectionCompass?: string
   /** Today's high minus low at the active station, feet. */
   dailyTideRangeFt: number
   /** 1 (Jan) - 12 (Dec). */

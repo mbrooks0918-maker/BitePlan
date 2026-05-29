@@ -67,6 +67,12 @@ const ZONE_MAX_MEMBERS = 200  // skip the polygon for very large chained cluster
 
 // ---- message protocol ----------------------------------------------------
 
+type PackedHourly = {
+  startMs: number
+  endMs: number
+  windSpeedKt: number
+  windDirectionCompass: string
+}
 type InitMessage = { type: 'init'; reqId: number }
 type ScoreMessage = {
   type: 'score'
@@ -78,6 +84,8 @@ type ScoreMessage = {
   tidePredictions: TidePrediction[]
   species: Species
   windSpeedKt: number
+  windDirectionCompass?: string
+  hourlyWind: PackedHourly[]
   maxUnits: number
 }
 type ComputeDayConditionsMessage = {
@@ -94,8 +102,25 @@ type ComputeDayConditionsMessage = {
   tidePredictions: TidePrediction[]
   species: Species
   windSpeedKt: number
+  windDirectionCompass?: string
+  hourlyWind: PackedHourly[]
 }
 type MainToWorker = InitMessage | ScoreMessage | ComputeDayConditionsMessage
+
+/**
+ * Look up the hourly wind for `timeMs`. Returns null when the time sits
+ * beyond the forecast window — caller falls back to current observed.
+ * Linear scan; NWS hourly is ≤ 156 entries so this is fine.
+ */
+function windForTime(
+  timeMs: number,
+  hourly: PackedHourly[],
+): PackedHourly | null {
+  for (const h of hourly) {
+    if (h.startMs <= timeMs && timeMs < h.endMs) return h
+  }
+  return null
+}
 
 export type ScoredEntry = { unit: ScoringUnit; result: ScoringResult }
 export type InitCompleteMessage = { type: 'init-complete'; reqId: number; featureCount: number }
@@ -229,6 +254,7 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
       sunrise,
       sunset,
       windSpeedKt: msg.windSpeedKt,
+      windDirectionCompass: msg.windDirectionCompass,
       dailyTideRangeFt: dailyTideRange(msg.tidePredictions, time),
       month: time.getMonth() + 1,
       hour: time.getHours(),
@@ -331,6 +357,15 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
         const { state: tideState } = getCurrentTideState(msg.tidePredictions, windowTime)
         const { sunrise, sunset } = getSunTimes(windowTime, msg.stationLat, msg.stationLon)
 
+        // Per-window wind: prefer the matching NWS hourly forecast; fall
+        // back to the current observed wind for windows beyond NWS's
+        // ~7-day forecast range. The fallback is a carry-forward
+        // approximation; documented here because it's used in both the
+        // day-conditions picker and the projection engine.
+        const hourly = windForTime(windowStartMs, msg.hourlyWind)
+        const windKt = hourly?.windSpeedKt ?? msg.windSpeedKt
+        const windDir = hourly?.windDirectionCompass ?? msg.windDirectionCompass
+
         const ctx: ScoringContext = {
           time: windowTime,
           tideState,
@@ -338,7 +373,8 @@ self.onmessage = async (e: MessageEvent<MainToWorker>) => {
           moonIllumination: getMoonIllumination(windowTime),
           sunrise,
           sunset,
-          windSpeedKt: msg.windSpeedKt,
+          windSpeedKt: windKt,
+          windDirectionCompass: windDir,
           dailyTideRangeFt: dailyTideRange(msg.tidePredictions, windowTime),
           month: windowTime.getMonth() + 1,
           hour: windowTime.getHours(),
