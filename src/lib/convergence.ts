@@ -18,32 +18,56 @@ import type { ConvergenceTag, HabitatFeature, HabitatType } from '@/types'
 
 // ---- detection knobs -----------------------------------------------------
 
-// Point / spit detection — tuned tighter after the first pass tagged most
-// coastline as a point. Real fishery points are sharp inflections, not
-// every gentle bend.
-const POINT_MIN_EDGE_M = 40            // skip jitter edges shorter than this
-const POINT_WEAK_TURN_DEG = 45         // left turn ≥ 45° (interior < 135°)
-const POINT_MODERATE_TURN_DEG = 75     // left turn ≥ 75° (interior < 105°)
-const POINT_STRONG_TURN_DEG = 105      // left turn ≥ 105° (interior < 75°)
+// =====================================================================
+// Step 12.5 v3 strict thresholds — see directive in handoff doc.
+// =====================================================================
+//
+// Each detector's bar was raised significantly after v2's "every shore lit"
+// visual. The v3 ground rule: only emit a tag when the structure is
+// unambiguously real to a human looking at the chart. Then the scoring
+// engine's multi-tag gate (in scoring.ts) requires 2+ DIFFERENT tag types
+// to unlock a unit above driveby — so individual detector liberties matter
+// less than they did under the single-tag unlock model.
+
+// --- Point / spit ---------------------------------------------------------
+//
+// Real fishery points are sharp inflections with substantial edges extending
+// outward. Digitization micro-jitter is filtered by collapsing vertices
+// within VERTEX_COLLAPSE_M before angle analysis. Then both adjacent edges
+// must be long, AND the turn must be sharp.
+const VERTEX_COLLAPSE_M = 20           // merge near-neighbors before angle calc
+const POINT_MIN_EDGE_M = 100           // adjacent edges must be ≥ 100 m each
+const POINT_WEAK_TURN_DEG = 60         // interior < 120°
+const POINT_MODERATE_TURN_DEG = 90     // interior < 90°
+const POINT_STRONG_TURN_DEG = 120      // interior < 60°
 const POINT_TAG_RADIUS_M = 25
 
-// Creek / drainage mouth detection (wetland-only) — tighter so we get
-// actual narrow drainages, not soft inlets.
-const CREEK_PINCH_M = 45               // pinch width threshold
-const CREEK_MIN_BOUNDARY_GAP = 12      // vertices apart along the ring
-const CREEK_MAX_RING_VERTICES = 400    // skip giant rings to keep it fast
-const CREEK_TAG_RADIUS_M = 25
-// Pinch-width thresholds for creek-mouth strength (anything ≤ STRONG_M is
-// strong, ≤ MODERATE_M is moderate, otherwise weak up to CREEK_PINCH_M).
-const CREEK_MODERATE_M = 25
-const CREEK_STRONG_M = 12
+// --- Creek / drainage mouth ----------------------------------------------
+//
+// Two non-adjacent ring vertices come within CREEK_PINCH_M of each other,
+// AND the two arcs between them enclose substantially different areas
+// (one is the "wetland interior", the other is the gap opening to the bay).
+// The asymmetry test is what distinguishes a drainage from a thin neck.
+// v3 iter-3: even 18 m pinches were noisy. Final: ≤ 12 m max width, gap arc
+// must be ≥ 10x smaller than interior arc, AND the interior side must be
+// substantial (≥ 5,000 sq m at this latitude). Only real drainage mouths
+// survive.
+const CREEK_PINCH_M = 12
+const CREEK_MIN_BOUNDARY_GAP = 14
+const CREEK_MAX_RING_VERTICES = 400
+const CREEK_SIDE_AREA_RATIO = 10
+const CREEK_INTERIOR_MIN_DEG2 = 5e-7 // ≈ 5,000 m² in degree-squared at ~30° N
+const CREEK_TAG_RADIUS_M = 18
+const CREEK_MODERATE_M = 10
+const CREEK_STRONG_M = 6
 
-// Habitat transition detection (cross-habitat adjacency). Initial 50 m and
-// then 12 m both tagged almost every coastal unit as a transition because
-// Perdido Bay habitats overlap densely. 5 m means the other habitat's
-// edge is essentially overlapping the queried unit's centroid — a true
-// seam, not just neighborhood adjacency.
-const TRANSITION_RADIUS_M = 5
+// --- Habitat transition --------------------------------------------------
+//
+// v3 iter-2: 25 m was generous in the dense Perdido data. Drop to 8 m so
+// only true edge-to-edge meetings qualify. (Centroid-distance filtering was
+// considered but rejected — large feature centroids sit far from edges, so
+// the check would false-negative legitimate transitions.)
+const TRANSITION_RADIUS_M = 8
 
 // ---- conversions ---------------------------------------------------------
 
@@ -84,6 +108,40 @@ function eachOuterRing(geom: Geometry, fn: (ring: number[][]) => void): void {
 }
 
 /**
+ * Collapse vertices within VERTEX_COLLAPSE_M of their predecessor into a
+ * single representative. Removes digitization noise before angle analysis
+ * so we don't pick up "points" that are just zigzag jitter.
+ */
+function collapseNearVertices(ring: number[][]): number[][] {
+  if (ring.length < 4) return ring
+  const out: number[][] = [ring[0]]
+  for (let i = 1; i < ring.length - 1; i++) {
+    const prev = out[out.length - 1]
+    if (haversineMeters(prev as [number, number], ring[i] as [number, number]) >= VERTEX_COLLAPSE_M) {
+      out.push(ring[i])
+    }
+  }
+  // Always re-close the ring with the original last vertex
+  if (out[out.length - 1] !== ring[ring.length - 1]) out.push(ring[ring.length - 1])
+  return out
+}
+
+/**
+ * Simple polygon area via the shoelace formula. Coordinates in degree-space;
+ * the value is only used for RATIOS (interior arc vs gap arc), not absolute
+ * area, so degree-units are fine.
+ */
+function shoelaceAbs(poly: number[][]): number {
+  let s = 0
+  for (let i = 0, n = poly.length; i < n; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % n]
+    s += a[0] * b[1] - b[0] * a[1]
+  }
+  return Math.abs(s) / 2
+}
+
+/**
  * Walk a CCW outer ring and emit one detected point per significant convex
  * (left-turn) inflection. The vertex location IS the detected point.
  *
@@ -92,10 +150,13 @@ function eachOuterRing(geom: Geometry, fn: (ring: number[][]) => void): void {
  * turn. Larger left turns = sharper points. We skip edges shorter than
  * POINT_MIN_EDGE_M so digitization jitter doesn't get tagged.
  */
-function detectPointsOnRing(ring: number[][], habitatType: HabitatType): DetectedPoint[] {
+function detectPointsOnRing(rawRing: number[][], habitatType: HabitatType): DetectedPoint[] {
   const out: DetectedPoint[] = []
-  const n = ring.length - 1 // closed ring duplicates first point
-  if (n < 4) return out
+  // v3: collapse digitization jitter before angle analysis. The collapsed
+  // ring is shorter and only retains topologically meaningful turns.
+  const ring = collapseNearVertices(rawRing)
+  const n = ring.length - 1
+  if (n < 6) return out
 
   for (let i = 0; i < n; i++) {
     const prev = ring[(i - 1 + n) % n]
@@ -106,15 +167,12 @@ function detectPointsOnRing(ring: number[][], habitatType: HabitatType): Detecte
     const dB = haversineMeters(curr as [number, number], next as [number, number])
     if (dA < POINT_MIN_EDGE_M || dB < POINT_MIN_EDGE_M) continue
 
-    // Edge vectors in degree-space — fine for angle math since both are local.
     const ax = curr[0] - prev[0]
     const ay = curr[1] - prev[1]
     const bx = next[0] - curr[0]
     const by = next[1] - curr[1]
-
     const cross = ax * by - ay * bx
     const dot = ax * bx + ay * by
-    // atan2(cross, dot) ∈ [-π, π]. Positive ⇒ left turn (convex on CCW ring).
     const turnRad = Math.atan2(cross, dot)
     const turnDeg = (turnRad * 180) / Math.PI
 
@@ -126,7 +184,6 @@ function detectPointsOnRing(ring: number[][], habitatType: HabitatType): Detecte
         : turnDeg >= POINT_MODERATE_TURN_DEG
           ? 'moderate'
           : 'weak'
-
     out.push({ lon: curr[0], lat: curr[1], strength, habitatType })
   }
   return out
@@ -146,15 +203,16 @@ function detectPointsOnRing(ring: number[][], habitatType: HabitatType): Detecte
  * Uses an rbush within the ring to avoid O(n²) on long rings. Still skipped
  * entirely if the ring is bigger than CREEK_MAX_RING_VERTICES.
  */
-function detectCreekMouthsOnRing(ring: number[][]): DetectedMouth[] {
+function detectCreekMouthsOnRing(rawRing: number[][]): DetectedMouth[] {
   const out: DetectedMouth[] = []
+  // v3: collapse jitter, then enforce side-area asymmetry. A pinch that
+  // splits the ring roughly in half is a thin neck, not a drainage mouth.
+  const ring = collapseNearVertices(rawRing)
   const n = ring.length - 1
   if (n > CREEK_MAX_RING_VERTICES) return out
-  if (n < 12) return out
+  if (n < 16) return out
 
-  // Build a small rbush over the ring's vertices for fast spatial lookups.
   const tree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; i: number }>()
-  // Approximate the pinch radius in degrees at this latitude.
   const sampleLat = ring[0][1]
   const dLat = CREEK_PINCH_M * DEG_PER_M_LAT
   const dLon = CREEK_PINCH_M * degPerMeterLon(sampleLat)
@@ -164,7 +222,6 @@ function detectCreekMouthsOnRing(ring: number[][]): DetectedMouth[] {
     })),
   )
 
-  // Track seen mouths so we don't emit duplicates from both ends of a pinch.
   const seen = new Set<string>()
 
   for (let i = 0; i < n; i++) {
@@ -175,7 +232,6 @@ function detectCreekMouthsOnRing(ring: number[][]): DetectedMouth[] {
     })
     for (const h of hits) {
       const j = h.i
-      // Require a meaningful boundary gap and a unique pair.
       const gap = Math.min(Math.abs(i - j), n - Math.abs(i - j))
       if (gap < CREEK_MIN_BOUNDARY_GAP) continue
       const pairKey = i < j ? `${i}-${j}` : `${j}-${i}`
@@ -184,6 +240,24 @@ function detectCreekMouthsOnRing(ring: number[][]): DetectedMouth[] {
 
       const widthM = haversineMeters(v as [number, number], ring[j] as [number, number])
       if (widthM > CREEK_PINCH_M) continue
+
+      // Side-area asymmetry check: the chord v→ring[j] splits the polygon
+      // into two arcs. Compute the area each arc encloses (arc + chord).
+      // A real drainage has one big "interior" side and one small "gap"
+      // side; a thin neck has two similar sides.
+      const [lo, hi] = i < j ? [i, j] : [j, i]
+      const sideA: number[][] = []
+      for (let k = lo; k <= hi; k++) sideA.push(ring[k])
+      const sideB: number[][] = []
+      for (let k = hi; k < n; k++) sideB.push(ring[k])
+      for (let k = 0; k <= lo; k++) sideB.push(ring[k])
+      const aA = shoelaceAbs(sideA)
+      const aB = shoelaceAbs(sideB)
+      const interior = Math.max(aA, aB)
+      const gapArea = Math.min(aA, aB)
+      const ratio = interior / Math.max(gapArea, 1e-12)
+      if (ratio < CREEK_SIDE_AREA_RATIO) continue
+      if (interior < CREEK_INTERIOR_MIN_DEG2) continue
 
       const midLon = (v[0] + ring[j][0]) / 2
       const midLat = (v[1] + ring[j][1]) / 2

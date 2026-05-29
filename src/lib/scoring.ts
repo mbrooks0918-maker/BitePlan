@@ -244,45 +244,69 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
     add(factor(false, 0, `Moderate tide range (${r.toFixed(1)} ft)`, 'tide'))
   }
 
-  // ----- 9) Convergence (Step 12.5 v2: UNLOCK, not bonus) ----------------
+  // ----- 9) Convergence (Step 12.5 v3: multi-tag UNLOCK) ----------------
   //
-  // Per the "convergence over coverage" directive, structural features
-  // (points, creek/drainage mouths, habitat transitions) decide whether a
-  // spot is even worth fishing — not how high it scores. So convergence
-  // tags are surfaced as fired factors with **zero delta** (they don't add
-  // to the score) but they UNLOCK the gate: a unit with at least one tag
-  // takes the natural sum; a unit with none gets clamped to driveby (≤ 4)
-  // no matter how perfect the conditions are.
+  // v3 raises the bar: a unit needs at least TWO convergence tags of
+  // DIFFERENT types ('point' + 'transition', 'creek_mouth' + 'point', etc.)
+  // to clear the gate. A unit with only one tag — or multiple tags of the
+  // same type — stays clamped at driveby no matter how good the conditions.
   //
-  // The factor entries still appear in the popup so the angler sees WHY
-  // the spot is allowed to score above driveby ("Marsh point/spit (strong)
-  // — structural feature").
+  // The reasoning, straight from the design directive: a grass bed near
+  // oysters isn't a convergence by itself; a grass bed near oysters AT A
+  // POINT or AT A DRAINAGE MOUTH is. Real fishing convergences are where
+  // structure meets structure.
+  //
+  // Tags fire with delta 0 — they exist to communicate "why this score is
+  // allowed to climb", not to add to it. The natural-sum semantics from v2
+  // are preserved.
+  const tagTypes = new Set(unit.convergence.map((t) => t.type))
+  const hasMultiConvergence = tagTypes.size >= 2
+
   for (const tag of unit.convergence) {
-    add(factor(true, 0, `${tag.description} — structural feature`, 'convergence'))
+    const label = hasMultiConvergence ? 'structural feature' : 'partial structure'
+    add(factor(true, 0, `${tag.description} — ${label}`, 'convergence'))
   }
 
-  // If the unit has NO convergence tags, surface that explicitly so the
-  // capped score doesn't look like a bug to anyone reading the popup.
-  if (unit.convergence.length === 0) {
-    add(
-      factor(
-        false,
-        0,
-        'No structural feature (point/creek/transition) — capped at driveby',
-        'convergence',
-      ),
-    )
+  // Surface a single combined "missing" line so the popup explains WHY the
+  // unit's score is capped. Three states:
+  //   1) No tags at all                → "No structural feature here"
+  //   2) One tag (or multiple same-type) → "Only X here — needs a different type to unlock"
+  //   3) Two+ different types          → no missing line (unit unlocked)
+  if (!hasMultiConvergence) {
+    if (tagTypes.size === 0) {
+      add(
+        factor(
+          false,
+          0,
+          'No structural feature here — capped at driveby',
+          'convergence',
+        ),
+      )
+    } else {
+      const onlyType = Array.from(tagTypes)[0]
+      const label =
+        onlyType === 'point'
+          ? 'a point'
+          : onlyType === 'creek_mouth'
+            ? 'a creek mouth'
+            : 'a habitat transition'
+      add(
+        factor(
+          false,
+          0,
+          `Only ${label} here — needs a second convergence type to unlock`,
+          'convergence',
+        ),
+      )
+    }
   }
 
   // ----- Final tally ------------------------------------------------------
-  // The GATING RULE: a unit with no convergence factor cannot exceed 4.0
-  // (driveby's upper edge). A unit with at least one convergence tag uses
-  // the natural sum. Math note: convergence factors have delta 0, so the
-  // sum is identical to what it would be without the tags — the tags only
-  // affect WHETHER the cap applies.
+  // GATING RULE (v3): unit needs ≥ 2 DIFFERENT convergence tag types to
+  // unlock above driveby. Otherwise score caps at 4.0 regardless of how
+  // good the additive conditions look.
   let score = Math.max(0, Math.min(10, total))
-  const hasConvergence = unit.convergence.length > 0
-  if (!hasConvergence) score = Math.min(score, 4.0)
+  if (!hasMultiConvergence) score = Math.min(score, 4.0)
   const tier = tierFor(score)
 
   return {
