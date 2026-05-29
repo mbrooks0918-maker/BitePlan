@@ -54,19 +54,26 @@ function formatDelta(d: number): string {
 function FactorLine({
   factor,
   fired,
+  index,
 }: {
   factor: ScoringFactor
   fired: boolean
+  index: number
 }) {
+  // Step 21: stagger the icon scale-in across the list — 30 ms per row.
+  const delayMs = Math.min(index * 30, 240)
   return (
-    <li className="flex items-start gap-2 py-1">
+    <li
+      className="biteplan-zonepopup-factor flex items-start gap-2 py-1"
+      style={{ ['--biteplan-factor-delay' as string]: `${delayMs}ms` }}
+    >
       {fired ? (
         <Check className="size-4 shrink-0 mt-0.5 text-emerald-400" />
       ) : (
         <XIcon className="size-4 shrink-0 mt-0.5 text-red-400" />
       )}
       <span className="flex-1 text-slate-200">{factor.description}</span>
-      <span className="shrink-0 text-slate-400 tabular-nums text-xs mt-0.5">
+      <span className="shrink-0 text-slate-300 tabular-nums text-xs mt-0.5">
         {formatDelta(factor.delta)}
       </span>
     </li>
@@ -320,7 +327,7 @@ function ZonePopup() {
         }}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        className="absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-slate-900 text-slate-100 rounded-t-2xl shadow-2xl overflow-hidden"
+        className="biteplan-zonepopup-card absolute inset-x-0 bottom-0 mx-auto w-full sm:max-w-md bg-slate-900 text-slate-100 rounded-t-2xl shadow-2xl overflow-hidden"
         style={{
           // Drag follows the finger; on release the snapback/dismiss is handled in onTouchEnd.
           transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
@@ -375,7 +382,7 @@ function ZonePopup() {
           ) : (
             <ul className="space-y-0.5 text-sm">
               {factorsToShow.map((f, i) => (
-                <FactorLine key={`${f.category}-${i}`} factor={f} fired={!isLowTier} />
+                <FactorLine key={`${f.category}-${i}`} factor={f} fired={!isLowTier} index={i} />
               ))}
             </ul>
           )}

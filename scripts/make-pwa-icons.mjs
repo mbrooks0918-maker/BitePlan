@@ -1,20 +1,20 @@
 /**
- * Placeholder PWA icon generator (Step 19).
+ * BitePlan PWA icon generator (Step 19 placeholder → Step 21 final).
  *
- * Hand-rolls solid-color RGB PNG icons (no external deps) into
- * public/icons/. Final icon design is Step 21 polish; until then we want
- * something that installs cleanly on iOS + Android and reads as
- * "BitePlan branded" rather than a generic browser fallback.
+ * Hand-rolls solid-RGB PNG icons (no external deps) into public/icons/.
+ * The design language matches the in-app heat-zone palette: dark slate
+ * canvas + a tier-graded "heat" disc with a stylized fish silhouette
+ * cutting through it.
  *
- * Each PNG is:
- *   - filled with a dark slate background (#0a0e1a — matches the manifest
- *     theme_color)
- *   - over which we draw an emerald rectangle and three tier-colored
- *     dots (yellow / orange / red) to evoke the heat zones the app paints
- *     on the map
+ * Visual:
+ *   - Background: slate-950 (#0a0e1a), matches manifest theme_color
+ *   - Centered heat disc with a red→orange→yellow radial banding that
+ *     evokes the fire/hot/driveby tiers
+ *   - Black fish silhouette running left→right across the disc; tail
+ *     flares with a small orange highlight to suggest a "biting" fish
  *
- * Generates: icon-192.png, icon-512.png, maskable-512.png (with extra
- * safe-area padding so it survives Android's circle/squircle masking).
+ * Maskable: extra padding so iOS / Android masks (circle / squircle)
+ * crop into background instead of artwork.
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -25,16 +25,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = resolve(__dirname, '..', 'public', 'icons')
 mkdirSync(OUT_DIR, { recursive: true })
 
-const BG = [0x0a, 0x0e, 0x1a] // slate-950ish
-const EMERALD = [0x10, 0xb9, 0x81]
-const FIRE = [0xef, 0x44, 0x44]
-const HOT = [0xf9, 0x73, 0x16]
-const DRIVEBY = [0xea, 0xb3, 0x08]
+// ---- palette -------------------------------------------------------------
+
+const BG = rgb('#0a0e1a')   // slate-950, manifest theme_color
+const FIRE = rgb('#ef4444')  // red-500
+const HOT = rgb('#f97316')   // orange-500
+const DRIVE = rgb('#eab308') // yellow-500
+const FISH = rgb('#0f172a')  // near-black slate, slightly lighter than BG
+const FISH_EYE = rgb('#fef3c7') // pale yellow-100 for eye highlight
+const ACCENT = rgb('#fbbf24')   // amber-400 tail flare
+
+function rgb(hex) {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ]
+}
 
 // ---- PNG byte assembly ---------------------------------------------------
+// Minimal RGB 8-bit PNG writer — no external dep, no alpha (we composite
+// onto a known background colour instead).
 
 function crc32(buf) {
-  // PNG spec CRC32. Computed lazily — only needed for chunk validation.
   let c
   const table = new Uint32Array(256)
   for (let n = 0; n < 256; n++) {
@@ -48,12 +61,7 @@ function crc32(buf) {
 }
 
 function u32(n) {
-  return Buffer.from([
-    (n >>> 24) & 0xff,
-    (n >>> 16) & 0xff,
-    (n >>> 8) & 0xff,
-    n & 0xff,
-  ])
+  return Buffer.from([(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff])
 }
 
 function chunk(type, data) {
@@ -64,7 +72,6 @@ function chunk(type, data) {
 }
 
 function makePng(size, draw) {
-  // 8-bit RGB, non-interlaced.
   const rowBytes = size * 3
   const raw = Buffer.alloc(size * (1 + rowBytes))
   for (let y = 0; y < size; y++) {
@@ -79,66 +86,134 @@ function makePng(size, draw) {
   }
   const idat = deflateSync(raw, { level: 9 })
   const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-  const ihdrData = Buffer.concat([
-    u32(size),
-    u32(size),
-    Buffer.from([8, 2, 0, 0, 0]), // bit depth 8, color type 2 (RGB), no filter/interlace
-  ])
+  const ihdrData = Buffer.concat([u32(size), u32(size), Buffer.from([8, 2, 0, 0, 0])])
   return Buffer.concat([sig, chunk('IHDR', ihdrData), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))])
 }
 
-// ---- Drawing helpers -----------------------------------------------------
+// ---- drawing primitives --------------------------------------------------
 
+function mix(a, b, t) {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ]
+}
+
+/**
+ * Anti-alias by sampling 2×2 sub-pixels and averaging. Cheap super-sampling
+ * gives the artwork much smoother edges at 192/512 px than naive nearest.
+ */
+function aa(draw, x, y) {
+  const samples = [
+    draw(x + 0.25, y + 0.25),
+    draw(x + 0.75, y + 0.25),
+    draw(x + 0.25, y + 0.75),
+    draw(x + 0.75, y + 0.75),
+  ]
+  return [
+    Math.round((samples[0][0] + samples[1][0] + samples[2][0] + samples[3][0]) / 4),
+    Math.round((samples[0][1] + samples[1][1] + samples[2][1] + samples[3][1]) / 4),
+    Math.round((samples[0][2] + samples[1][2] + samples[2][2] + samples[3][2]) / 4),
+  ]
+}
+
+/**
+ * The icon's actual shape function. `size` is the icon dimension and
+ * `padding` reserves a safe-area gutter (used by the maskable variant).
+ *
+ * Layout: a centered heat disc (radius = innerSize * 0.42) painted with
+ * a 3-stop radial gradient — yellow core → orange middle → red rim. A
+ * dark fish silhouette overlays the disc with a small accent highlight
+ * at the tail.
+ */
 function drawFor(size, padding) {
-  // padding is a fraction of `size` reserved as safe-area gutter
-  // (matters for the maskable icon).
   const inner = size - 2 * padding
   const cx = size / 2
   const cy = size / 2
-  // Emerald rectangle, centered, occupies the middle 60% of the inner area
-  // — evokes the bottom sheet / brand block.
-  const rectW = inner * 0.6
-  const rectH = inner * 0.32
-  const rectX0 = cx - rectW / 2
-  const rectX1 = cx + rectW / 2
-  const rectY0 = cy + inner * 0.1
-  const rectY1 = rectY0 + rectH
-  // Three heat dots above the rectangle: yellow / orange / red, left → right.
-  const dotR = inner * 0.07
-  const dotY = cy - inner * 0.16
-  const dotXs = [cx - inner * 0.18, cx, cx + inner * 0.18]
-  const dotColors = [DRIVEBY, HOT, FIRE]
+  const discR = inner * 0.42
+  const fishCenterY = cy + inner * 0.02
+  const fishLen = inner * 0.7
+  const fishHeight = inner * 0.18
+  const fishX0 = cx - fishLen / 2
+  const fishX1 = cx + fishLen / 2
+  const tailTipX = fishX0 - inner * 0.05
 
-  return (x, y) => {
-    // Background
+  return (xs, ys) => {
+    // Heat disc (radial gradient)
+    const dx = xs - cx
+    const dy = ys - cy
+    const r = Math.sqrt(dx * dx + dy * dy)
     let color = BG
-    // Rectangle
-    if (x >= rectX0 && x <= rectX1 && y >= rectY0 && y <= rectY1) color = EMERALD
-    // Dots (loop after rect so dots draw over)
-    for (let i = 0; i < dotXs.length; i++) {
-      const dx = x - dotXs[i]
-      const dy = y - dotY
-      if (dx * dx + dy * dy <= dotR * dotR) color = dotColors[i]
+    if (r <= discR) {
+      const t = r / discR
+      if (t < 0.5) color = mix(DRIVE, HOT, t * 2)
+      else color = mix(HOT, FIRE, (t - 0.5) * 2)
     }
+    // Outer rim soft edge
+    else if (r <= discR + 1.5) {
+      const t = (r - discR) / 1.5
+      color = mix(FIRE, BG, t)
+    }
+
+    // Fish body — an elongated ellipse running horizontally.
+    const localX = xs - cx
+    const localY = ys - fishCenterY
+    const bodyRx = fishLen * 0.45
+    const bodyRy = fishHeight / 2
+    const bodyV = (localX / bodyRx) ** 2 + (localY / bodyRy) ** 2
+    if (bodyV <= 1 && xs >= fishX0 && xs <= fishX1) {
+      color = FISH
+    }
+
+    // Tail triangle — narrows from the body's left flank to a sharp tip.
+    if (xs < fishX0 && xs >= tailTipX) {
+      const tailT = (fishX0 - xs) / (fishX0 - tailTipX)
+      const tailHalf = (1 - tailT) * fishHeight * 0.6
+      if (Math.abs(ys - fishCenterY) <= tailHalf) {
+        color = FISH
+      }
+    }
+
+    // Accent: tail flare highlight near the body-tail junction.
+    if (xs >= fishX0 - inner * 0.02 && xs <= fishX0 + inner * 0.04) {
+      const flareDy = ys - fishCenterY
+      if (Math.abs(flareDy) <= fishHeight * 0.06) {
+        color = ACCENT
+      }
+    }
+
+    // Eye dot
+    const eyeX = fishX0 + fishLen * 0.78
+    const eyeY = fishCenterY - fishHeight * 0.1
+    const eyeR = fishHeight * 0.09
+    const edx = xs - eyeX
+    const edy = ys - eyeY
+    if (edx * edx + edy * edy <= eyeR * eyeR) {
+      color = FISH_EYE
+    }
+
     return color
   }
 }
 
-// ---- Emit ----------------------------------------------------------------
+function renderIcon(size, padding) {
+  const draw = drawFor(size, padding)
+  return makePng(size, (x, y) => aa(draw, x, y))
+}
+
+// ---- emit ----------------------------------------------------------------
 
 function write(name, size, padding) {
-  const draw = drawFor(size, padding)
-  const buf = makePng(size, draw)
+  const buf = renderIcon(size, padding)
   const path = resolve(OUT_DIR, name)
   writeFileSync(path, buf)
   console.log(`  ${name} — ${(buf.length / 1024).toFixed(1)} KB`)
 }
 
-console.log('Generating PWA icons…')
-write('icon-192.png', 192, 12)
-write('icon-512.png', 512, 32)
-// Maskable icons need ~20% safe area on each side so the mask doesn't
-// crop into the artwork. We use 25% padding to be safe across Android
-// mask shapes.
+console.log('Generating PWA icons (Step 21 final)…')
+write('icon-192.png', 192, 8)
+write('icon-512.png', 512, 24)
+// Maskable: 25% safe-area padding so the mask doesn't crop into the disc
 write('maskable-512.png', 512, 128)
 console.log('Done.')

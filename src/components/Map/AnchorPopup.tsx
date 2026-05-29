@@ -129,7 +129,7 @@ function AnchorPopup() {
               <div className="text-slate-200">{selected.notes}</div>
             </div>
           )}
-          <div className="text-[10px] text-slate-500 pt-1">
+          <div className="text-[10px] text-slate-400 pt-1">
             {selected.lat.toFixed(5)}, {selected.lon.toFixed(5)}
           </div>
         </section>

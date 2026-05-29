@@ -98,6 +98,8 @@ function BottomSheet({ children }: Props) {
     [setSnap],
   )
 
+  const [grabbing, setGrabbing] = useState(false)
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Only react to the primary button / first touch.
     if (e.button !== 0 && e.pointerType === 'mouse') return
@@ -108,6 +110,7 @@ function BottomSheet({ children }: Props) {
     dragStartHeightVh.current = SNAP_HEIGHTS[snap]
     lastMoveY.current = e.clientY
     lastMoveTime.current = dragStartTime.current
+    setGrabbing(true)
   }
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -122,6 +125,7 @@ function BottomSheet({ children }: Props) {
   }
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    setGrabbing(false)
     if (dragStartY.current == null) return
     const startY = dragStartY.current
     dragStartY.current = null
@@ -197,7 +201,9 @@ function BottomSheet({ children }: Props) {
         'fixed inset-x-0 bottom-0 z-30 mx-auto w-full sm:max-w-[480px] ' +
         'bg-slate-900 text-slate-100 rounded-t-2xl shadow-2xl ' +
         'border-t border-slate-700/60 ' +
-        'transition-[height,transform,opacity] duration-200 ease-out overflow-hidden ' +
+        // Step 21: cubic-bezier(0.32, 0.72, 0, 1) is the iOS-sheet snap
+        // curve — feels more native than the prior ease-out.
+        'transition-[height,transform,opacity] duration-300 [transition-timing-function:cubic-bezier(0.32,0.72,0,1)] overflow-hidden ' +
         'flex flex-col'
       }
       style={{
@@ -228,7 +234,10 @@ function BottomSheet({ children }: Props) {
       >
         <div
           aria-hidden
-          className="w-12 h-1.5 bg-slate-600 rounded-full"
+          className={
+            'biteplan-sheet-handle w-12 h-1.5 bg-slate-600 rounded-full ' +
+            (grabbing ? 'biteplan-sheet-handle--grabbing' : '')
+          }
         />
         {/* Visually-hidden text describes the gesture to screen readers. */}
         <span className="sr-only">

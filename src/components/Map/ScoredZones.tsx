@@ -54,13 +54,22 @@ const ORANGE_DOT: PathOptions = {
   weight: 0,
 }
 
-// Pulsing fire dot — see biteplan-fire-dot CSS in src/index.css.
-const FIRE_DOT_ICON = L.divIcon({
-  className: 'biteplan-fire-dot-marker',
-  html: '<div class="biteplan-fire-dot"></div>',
-  iconSize: [28, 28], // 14 px radius × 2
-  iconAnchor: [14, 14],
-})
+/**
+ * Build a fire-dot DivIcon with a deterministic phase offset so the pulse
+ * staggers across many fires instead of beating in unison. The offset is
+ * a hash of the unit's lat/lon mapped into the 0–2s pulse cycle and
+ * applied via the `--biteplan-pulse-phase` CSS variable (Step 21 polish).
+ */
+function makeFireDotIcon(lon: number, lat: number): L.DivIcon {
+  // Cheap deterministic hash → [0, 2000) ms offset.
+  const phaseMs = Math.floor(((lon * 1000) ^ (lat * 1000)) & 0xffff) % 2000
+  return L.divIcon({
+    className: 'biteplan-fire-dot-marker biteplan-tier-fadein',
+    html: `<div class="biteplan-fire-dot" style="--biteplan-pulse-phase:-${phaseMs}ms"></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  })
+}
 
 function ScoredZones() {
   const zones = useBitePlanStore((s) => s.zones)
@@ -171,7 +180,7 @@ function ScoredZones() {
         <Marker
           key={`d-fire-${i}-${e.unit.id}`}
           position={[e.unit.centroid[1], e.unit.centroid[0]]}
-          icon={FIRE_DOT_ICON}
+          icon={makeFireDotIcon(e.unit.centroid[0], e.unit.centroid[1])}
           eventHandlers={{ click: () => selectZone(e) }}
         />
       ))}

@@ -135,7 +135,7 @@ function DayPicker({ startDate, dayCount }: DayPickerProps) {
           Computing day conditions…
         </div>
       ) : dayConditions.length === 0 ? (
-        <div className="px-2 py-4 text-sm text-slate-500 italic">
+        <div className="px-2 py-4 text-sm text-slate-400 italic">
           No conditions data yet.
         </div>
       ) : (
@@ -162,7 +162,7 @@ function DayPicker({ startDate, dayCount }: DayPickerProps) {
       )}
       {/* Hour-axis hints aren't useful here, but a tiny "tap to jump" hint
        *  helps first-time users. */}
-      <div className="mt-1 text-[10px] text-slate-500 text-center">
+      <div className="mt-1 text-[10px] text-slate-400 text-center">
         Tap a day to jump the map to its best window
       </div>
     </div>

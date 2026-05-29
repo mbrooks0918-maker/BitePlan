@@ -252,16 +252,165 @@
   margin-left: -16px;
   margin-top: -16px;
   border-radius: 9999px;
-  background: rgba(59, 130, 246, 0.35);
-  animation: biteplan-user-location-ring-pulse 2s ease-in-out infinite;
+  background: rgba(59, 130, 246, 0.3);
+  /* Step 21: 2s → 3s for a calmer cadence; opacity peak 0.55 (was 0.65). */
+  animation: biteplan-user-location-ring-pulse 3s ease-in-out infinite;
 }
 @keyframes biteplan-user-location-ring-pulse {
   0% {
     transform: scale(0.5);
-    opacity: 0.65;
+    opacity: 0.55;
   }
   100% {
     transform: scale(1.6);
     opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------
+ * Step 21 polish — animation refinements.
+ *
+ * Fire dots get a deterministic per-marker phase offset so the pulses
+ * stagger across the map instead of beating in unison. The offset is
+ * injected by ScoredZones.tsx via a CSS custom property on the marker's
+ * inner div. Hot dots get a barely-perceptible "breathe" with the same
+ * per-marker offset. Drive-by dots stay static.
+ *
+ * The cascade fade-in is also controlled here: the .biteplan-tier-fadein
+ * class is added by ScoredZones with `--biteplan-fadein-delay` set per
+ * tier so fires lead, hots follow, driveby lands last.
+ * ------------------------------------------------------------------ */
+
+.biteplan-fire-dot {
+  /* Step 21: per-marker phase offset prevents the unison pulse. The
+   * variable is set by ScoredZones from a hash of the unit's lat/lon. */
+  animation-delay: var(--biteplan-pulse-phase, 0s);
+  /* The outer wrapper-marker carries the soft glow ring (radial gradient
+   * is on the wrapper background, faded by the same pulse). */
+}
+.biteplan-fire-dot-marker {
+  /* Soft outer glow that pulses with the inner dot. */
+  background: radial-gradient(
+    circle,
+    rgba(239, 68, 68, 0.35) 0%,
+    rgba(239, 68, 68, 0) 70%
+  ) !important;
+  animation: biteplan-fire-glow 2s ease-in-out infinite;
+  animation-delay: var(--biteplan-pulse-phase, 0s);
+}
+@keyframes biteplan-fire-glow {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* Hot dots breathe — 3s cycle, 1.00→1.05 scale, opacity 0.85→1.0.
+ * Step 21 adds the per-marker class; the dot itself is a Leaflet
+ * CircleMarker (canvas-rendered), so the breathe targets the
+ * orange-halo CircleMarker via a sibling wrapper class. Browsers
+ * with reduced-motion preference get a static halo via the override
+ * at the bottom of this file. */
+.biteplan-hot-breathe {
+  animation: biteplan-hot-breathe 3s ease-in-out infinite;
+  animation-delay: var(--biteplan-pulse-phase, 0s);
+  will-change: opacity;
+}
+@keyframes biteplan-hot-breathe {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
+/* Cascade fade-in for newly rendered tiers. ScoredZones flips a key
+ * each time the worker delivers a new pass, so React mounts fresh
+ * elements that play this animation from the start. */
+.biteplan-tier-fadein {
+  animation: biteplan-tier-fadein 300ms ease-out both;
+  animation-delay: var(--biteplan-fadein-delay, 0ms);
+}
+@keyframes biteplan-tier-fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ZonePopup spring slide-up. The card has class
+ * .biteplan-zonepopup-card; the backdrop fades in/out together. */
+.biteplan-zonepopup-card {
+  animation: biteplan-popup-spring 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+@keyframes biteplan-popup-spring {
+  from { transform: translateY(110%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.biteplan-zonepopup-factor {
+  animation: biteplan-factor-icon-in 200ms ease-out both;
+  animation-delay: var(--biteplan-factor-delay, 0ms);
+}
+@keyframes biteplan-factor-icon-in {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Saved waypoint pin drop — applied when a brand-new waypoint mounts. */
+.biteplan-waypoint-drop {
+  animation: biteplan-waypoint-drop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes biteplan-waypoint-drop {
+  0% { transform: translateY(-24px); opacity: 0; }
+  60% { transform: translateY(2px); opacity: 1; }
+  80% { transform: translateY(-1px); }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Bottom-sheet grab handle scale on touch — managed via a class toggled
+ * by BottomSheet.tsx on pointerdown / pointerup. */
+.biteplan-sheet-handle {
+  transition: transform 100ms ease-out;
+  transform: scaleX(1);
+}
+.biteplan-sheet-handle--grabbing {
+  transform: scaleX(1.2);
+}
+
+/* On-Water Mode overlay stagger. The container fades in 0/150/300 ms
+ * after enabling on-water, matching the spec's "tide pill first, then
+ * GPS button, then save button". */
+.biteplan-onwater-overlay {
+  animation: biteplan-onwater-fadein 200ms ease-out both;
+  animation-delay: var(--biteplan-onwater-delay, 0ms);
+}
+@keyframes biteplan-onwater-fadein {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ------------------------------------------------------------------
+ * Reduced-motion override.
+ *
+ * Per spec: respect prefers-reduced-motion. All decorative animations
+ * collapse to either a fade or are disabled outright. Structural
+ * animations (the bottom sheet snap-height transition, the ZonePopup
+ * mount) remain as plain fades so the UI still feels responsive.
+ * ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .biteplan-fire-dot,
+  .biteplan-fire-dot-marker,
+  .biteplan-hot-breathe,
+  .biteplan-user-location-ring {
+    animation: none !important;
+  }
+  .biteplan-tier-fadein,
+  .biteplan-zonepopup-card,
+  .biteplan-zonepopup-factor,
+  .biteplan-waypoint-drop,
+  .biteplan-onwater-overlay {
+    animation-duration: 100ms !important;
+    animation-timing-function: ease-out !important;
+  }
+  /* Bottom sheet snap transition shortens but keeps the height tween so
+   * the user still sees where the sheet went. */
+  aside[data-snap] {
+    transition-duration: 100ms !important;
   }
 }

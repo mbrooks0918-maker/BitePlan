@@ -147,7 +147,7 @@ function SavedWaypointPopup() {
         <section className="px-4 pt-4 pb-3">
           <div className="text-sm text-slate-300">
             Saved {savedAgo}
-            <span className="text-slate-500"> · {savedAt}</span>
+            <span className="text-slate-400"> · {savedAt}</span>
           </div>
           <div className="mt-2 text-base text-slate-200">
             Was <span className="font-semibold tracking-wider">{TIER_LABEL[wp.tier]}</span>{' '}

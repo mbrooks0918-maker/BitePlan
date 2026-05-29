@@ -65,11 +65,12 @@ function OnWaterExitButton() {
       aria-label="Exit On-Water Mode"
       onClick={() => setOnWaterMode(false)}
       className={
-        'fixed top-4 left-4 z-[1100] size-12 rounded-full ' +
+        'biteplan-onwater-overlay fixed top-4 left-4 z-[1100] size-12 rounded-full ' +
         'bg-slate-900/70 hover:bg-slate-900/90 text-slate-100 ' +
         'shadow-lg backdrop-blur-sm flex items-center justify-center ' +
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400'
       }
+      style={{ ['--biteplan-onwater-delay' as string]: '150ms' }}
     >
       <XIcon className="size-5" aria-hidden />
     </button>
@@ -143,12 +144,15 @@ function OnWaterTidePill() {
       aria-label={`Tide ${stateText} ${subText}`}
       onClick={() => setExpanded((v) => !v)}
       className={
-        'fixed top-4 left-20 z-[1090] max-w-[min(75vw,420px)] text-left ' +
+        'biteplan-onwater-overlay fixed top-4 left-20 z-[1090] max-w-[min(75vw,420px)] text-left ' +
         `${bg} text-white rounded-2xl px-5 py-4 shadow-2xl backdrop-blur-md ` +
         'drop-shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ' +
         'transition-all'
       }
-      style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.85)' }}
+      style={{
+        textShadow: '0 1px 4px rgba(0, 0, 0, 0.85)',
+        ['--biteplan-onwater-delay' as string]: '0ms',
+      }}
     >
       <div className="text-4xl font-extrabold tracking-wider leading-none">
         {stateText}
@@ -286,12 +290,13 @@ function OnWaterSaveButton() {
         aria-label="Save waypoint at my location"
         onClick={onSave}
         className={
-          'fixed bottom-6 right-6 z-[1090] size-[72px] rounded-full ' +
+          'biteplan-onwater-overlay fixed bottom-6 right-6 z-[1090] size-[72px] rounded-full ' +
           'bg-emerald-600 hover:bg-emerald-500 text-white ' +
           'shadow-2xl backdrop-blur-sm flex items-center justify-center ' +
           'drop-shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ' +
           'active:scale-95 transition-transform'
         }
+        style={{ ['--biteplan-onwater-delay' as string]: '300ms' }}
       >
         <BookmarkPlus className="size-8" aria-hidden />
       </button>

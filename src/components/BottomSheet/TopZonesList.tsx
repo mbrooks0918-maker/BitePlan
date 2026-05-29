@@ -52,10 +52,10 @@ function TopZonesList() {
         <h3 className="text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
           <Flame className="size-3.5" /> Top in view
         </h3>
-        <span className="text-[10px] text-slate-500">{top.length} of {filtered.length}</span>
+        <span className="text-[10px] text-slate-400">{top.length} of {filtered.length}</span>
       </div>
       {top.length === 0 ? (
-        <div className="text-xs text-slate-500 italic px-1 py-2">
+        <div className="text-xs text-slate-400 italic px-1 py-2">
           No qualifying zones in current view. Pan or change filters.
         </div>
       ) : (
@@ -82,11 +82,11 @@ function TopZonesList() {
                     {HABITAT_LABEL[e.unit.habitatType]} ·{' '}
                     <span className="text-slate-300">{TIER_LABEL[e.result.tier]}</span>
                   </div>
-                  <div className="text-[10px] text-slate-500 truncate tabular-nums">
+                  <div className="text-[10px] text-slate-400 truncate tabular-nums">
                     {e.unit.centroid[1].toFixed(4)}, {e.unit.centroid[0].toFixed(4)}
                   </div>
                 </div>
-                <ArrowUpRight className="size-4 text-slate-500 shrink-0" />
+                <ArrowUpRight className="size-4 text-slate-400 shrink-0" />
               </button>
             </li>
           ))}

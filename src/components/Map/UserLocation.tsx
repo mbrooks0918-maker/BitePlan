@@ -53,11 +53,16 @@ function UserLocation() {
   const map = useMap()
 
   // First-fix auto-centre. Fires exactly once per session per the spec
-  // ("subsequent updates don't pan").
+  // ("subsequent updates don't pan"). Step 21 upgrades the pan to a
+  // flyTo so the camera glides in at a comfortable speed instead of
+  // teleporting — feels far more "I'm zooming to you" than a hard pan.
   useEffect(() => {
     if (!loc) return
     if (hasAutoCentered) return
-    map.panTo([loc.lat, loc.lon], { animate: true, duration: 0.8 })
+    map.flyTo([loc.lat, loc.lon], Math.max(map.getZoom(), 14), {
+      duration: 0.8,
+      easeLinearity: 0.4,
+    })
     markAutoCentered()
   }, [loc, hasAutoCentered, markAutoCentered, map])
 

@@ -92,7 +92,7 @@ function Row({
         <div className="text-xs text-slate-400 mt-0.5 truncate">
           {HABITAT_LABEL[wp.habitatType]} · saved {formatDistanceToNow(wp.createdAt, { addSuffix: true })}
         </div>
-        <div className="text-xs text-slate-500 mt-0.5 truncate">
+        <div className="text-xs text-slate-400 mt-0.5 truncate">
           {wp.score.toFixed(1)}/10 · {TIDE_LABEL[wp.tideState]}
         </div>
       </div>
@@ -105,7 +105,7 @@ function Row({
           'shrink-0 w-12 flex items-center justify-center transition-colors ' +
           (armingDelete
             ? 'bg-red-900/40 text-red-300 hover:bg-red-900/60'
-            : 'text-slate-500 hover:text-red-400 hover:bg-slate-800')
+            : 'text-slate-400 hover:text-red-400 hover:bg-slate-800')
         }
       >
         <span className="relative flex items-center justify-center">
@@ -136,7 +136,7 @@ function WaypointsList() {
     <section aria-label="Saved waypoints" className="mt-4">
       <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 px-1 flex items-center gap-1.5">
         <Bookmark className="size-3.5" /> Saved Waypoints
-        <span className="text-slate-500 normal-case ml-1">({count})</span>
+        <span className="text-slate-400 normal-case ml-1">({count})</span>
       </div>
       {count === 0 ? (
         <div className="flex flex-col items-center justify-center text-center px-6 py-8 bg-slate-800/30 rounded-md border border-slate-800">
@@ -144,7 +144,7 @@ function WaypointsList() {
           <p className="text-sm text-slate-300 leading-snug">
             No saved waypoints yet.
           </p>
-          <p className="text-xs text-slate-500 mt-1 leading-snug">
+          <p className="text-xs text-slate-400 mt-1 leading-snug">
             Tap any zone, then ‘Save Waypoint’ to bookmark a spot.
           </p>
         </div>

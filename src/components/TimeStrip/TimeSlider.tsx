@@ -368,7 +368,7 @@ function TimeSlider() {
       </div>
 
       {/* Hour-axis hints — optional but readable */}
-      <div className="mt-2 flex justify-between text-[10px] text-slate-500 tabular-nums px-1">
+      <div className="mt-2 flex justify-between text-[10px] text-slate-400 tabular-nums px-1">
         <span>12 AM</span>
         <span>6 AM</span>
         <span>12 PM</span>
