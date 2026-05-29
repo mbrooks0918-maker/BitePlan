@@ -11,6 +11,8 @@ import NamedAnchors from './NamedAnchors'
 import AnchorPopup from './AnchorPopup'
 import SavedWaypoints from './SavedWaypoints'
 import SavedWaypointPopup from './SavedWaypointPopup'
+import UserLocation from './UserLocation'
+import LocateButton from '@/components/LocateButton'
 import SaveToast from '@/components/SaveWaypoint/SaveToast'
 import BottomSheet from '@/components/BottomSheet/BottomSheet'
 import SheetContent from '@/components/BottomSheet/SheetContent'
@@ -181,9 +183,11 @@ function MapView() {
         <ScoredZones />
         <NamedAnchors />
         <SavedWaypoints />
+        <UserLocation />
         <MapStateSync />
         <MapFlyToSync />
         <InvalidateSizeOnMount />
+        <LocateButton />
       </MapContainer>
       <ScoringStatus />
       <BottomSheet>

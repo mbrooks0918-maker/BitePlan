@@ -5,11 +5,13 @@ import type {
   DayCondition,
   HeatZone,
   LatLon,
+  LocationStatus,
   ScoringContext,
   ScoringResult,
   ScoringUnit,
   Species,
   TimeMode,
+  UserLocation,
   Waypoint,
 } from '@/types'
 import {
@@ -202,6 +204,23 @@ type BitePlanState = {
   sheetSnapPoint: SheetSnapPoint
   tierFilter: TierFilter
 
+  // Step 17 — GPS / Locate Me state.
+  // userLocation is null until the first fix lands; once present, it
+  // updates on every watchPosition tick. The UI doesn't pan automatically
+  // (battery + UX) — only on explicit "centerMapOnUser" calls and on the
+  // very first fix after the user opted in.
+  userLocation: UserLocation | null
+  locationStatus: LocationStatus
+  locationWatchActive: boolean
+  /** Set by the geolocation watcher when the user appears to be on the
+   *  water (moving > 2 mph for 5+ min inside the coverage bbox). Step 18
+   *  reads this to prompt the On-Water Mode toggle. Phase-1 stub. */
+  onWaterCandidate: boolean
+  /** True after we've automatically centred the map on the user's first
+   *  fix in this session, so subsequent fixes don't keep yanking the
+   *  view away from wherever the user has panned. */
+  hasAutoCenteredOnUser: boolean
+
   setCenter: (center: LatLon) => void
   setZoom: (zoom: number) => void
   setBounds: (bounds: Bounds) => void
@@ -239,6 +258,17 @@ type BitePlanState = {
   flyToScoredUnit: (entry: ScoredEntry) => void
   setSheetSnapPoint: (snap: SheetSnapPoint) => void
   setTierFilter: (filter: TierFilter) => void
+
+  /** Step 17 — geolocation actions. The lib/geolocation.ts module owns the
+   *  navigator.geolocation handle and visibility wiring; these actions are
+   *  thin shims that let UI components trigger / read state. */
+  setLocationStatus: (status: LocationStatus) => void
+  setUserLocation: (loc: UserLocation | null) => void
+  setLocationWatchActive: (active: boolean) => void
+  setOnWaterCandidate: (v: boolean) => void
+  markAutoCentered: () => void
+  /** Called when the user explicitly stops tracking. Clears the dot. */
+  clearUserLocation: () => void
   toggleHabitat: (key: HabitatKey) => void
   setHabitatLoading: (key: HabitatKey, isLoading: boolean) => void
   updateTideStation: (mapCenter: LatLon) => Promise<void>
@@ -389,6 +419,11 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   pendingFlyToLatLon: null,
   sheetSnapPoint: loadSheetSnap(),
   tierFilter: 'all',
+  userLocation: null,
+  locationStatus: 'off',
+  locationWatchActive: false,
+  onWaterCandidate: false,
+  hasAutoCenteredOnUser: false,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -499,6 +534,19 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     set({ sheetSnapPoint: snap })
   },
   setTierFilter: (filter) => set({ tierFilter: filter }),
+  setLocationStatus: (status) => set({ locationStatus: status }),
+  setUserLocation: (loc) => set({ userLocation: loc }),
+  setLocationWatchActive: (active) => set({ locationWatchActive: active }),
+  setOnWaterCandidate: (v) => set({ onWaterCandidate: v }),
+  markAutoCentered: () => set({ hasAutoCenteredOnUser: true }),
+  clearUserLocation: () =>
+    set({
+      userLocation: null,
+      locationStatus: 'off',
+      locationWatchActive: false,
+      onWaterCandidate: false,
+      hasAutoCenteredOnUser: false,
+    }),
 
   toggleHabitat: (key) =>
     set((s) => ({ habitatLayers: { ...s.habitatLayers, [key]: !s.habitatLayers[key] } })),

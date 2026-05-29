@@ -214,3 +214,54 @@
   width: 100%;
   height: 100%;
 }
+
+/* ------------------------------------------------------------------
+ * User location dot (Step 17)
+ *
+ * A solid blue centre with a soft pulsing ring. The ring expands from
+ * 16 → 24 px radius over 2s and fades out, in an infinite ease-in-out
+ * loop. Kept intentionally subtle so it doesn't compete visually with
+ * the fire-tier dot pulse from Step 7.
+ * ------------------------------------------------------------------ */
+.biteplan-user-location-marker {
+  background: transparent !important;
+  /* Pointer events off — the user-location marker is an indicator, not
+   * an interactive layer. */
+  pointer-events: none;
+}
+.biteplan-user-location-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  margin-top: -8px;
+  border-radius: 9999px;
+  background: #3b82f6;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.biteplan-user-location-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin-left: -16px;
+  margin-top: -16px;
+  border-radius: 9999px;
+  background: rgba(59, 130, 246, 0.35);
+  animation: biteplan-user-location-ring-pulse 2s ease-in-out infinite;
+}
+@keyframes biteplan-user-location-ring-pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}

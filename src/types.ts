@@ -5,6 +5,23 @@ export type LatLon = {
   lon: number
 }
 
+/** Step 17 — single GPS reading. `accuracyM` is the device-reported radius
+ *  in metres; `timestamp` is the epoch ms returned by the Geolocation API. */
+export type UserLocation = {
+  lat: number
+  lon: number
+  accuracyM: number
+  timestamp: number
+}
+
+/** Step 17 — UI state for the LocateButton + tracking. */
+export type LocationStatus =
+  | 'off'         // not tracking; default
+  | 'requesting'  // awaiting permission / initial fix
+  | 'on'          // watchPosition running, dot visible
+  | 'denied'      // permission denied
+  | 'error'       // POSITION_UNAVAILABLE or TIMEOUT (no prior fix)
+
 export type MapState = {
   center: LatLon
   zoom: number
