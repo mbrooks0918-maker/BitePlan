@@ -29,6 +29,7 @@ import WaypointsList from './WaypointsList'
 import TimeSlider from '@/components/TimeStrip/TimeSlider'
 import DayPickerStrip from '@/components/TimeStrip/DayPickerStrip'
 import TripStrip from '@/components/Trip/TripStrip'
+import { InstallAppButton, OfflineIndicator } from '@/components/Install/InstallPrompt'
 
 function ModeToggle() {
   const timeMode = useBitePlanStore((s) => s.timeMode)
@@ -109,6 +110,11 @@ function SettingsSection() {
           </button>
         </div>
       </div>
+      {/* Install row — Step 19. Hidden when the app is already installed
+          so it doesn't clutter a Settings list that's mostly a stub. */}
+      <div className="mt-3">
+        <InstallAppButton />
+      </div>
     </section>
   )
 }
@@ -129,6 +135,10 @@ function SheetContent() {
     <div className="space-y-2">
       {/* PEEK — always visible */}
       <ConditionsPanel />
+      {/* Step 19: only visible when navigator.onLine === false. Sits in
+          the always-visible Peek band so the user knows immediately that
+          the engine is running on cached data. */}
+      <OfflineIndicator />
 
       {/* HALF — visible when snap ≥ 'half' (the parent height-clip hides
           it at peek). We render unconditionally so the transition reveals

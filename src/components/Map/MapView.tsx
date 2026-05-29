@@ -17,6 +17,7 @@ import SaveToast from '@/components/SaveWaypoint/SaveToast'
 import BottomSheet from '@/components/BottomSheet/BottomSheet'
 import SheetContent from '@/components/BottomSheet/SheetContent'
 import OnWaterMode from '@/components/OnWater/OnWaterMode'
+import InstallPrompt from '@/components/Install/InstallPrompt'
 
 const ESRI_TILE_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -199,6 +200,7 @@ function MapView() {
       <SavedWaypointPopup />
       <SaveToast />
       <OnWaterMode />
+      <InstallPrompt />
     </>
   )
 }
