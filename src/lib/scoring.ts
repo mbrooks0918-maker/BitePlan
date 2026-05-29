@@ -330,16 +330,24 @@ function pressureDelta(
 }
 
 // ---- Step 13.5 audit: frontal-phase factor -------------------------------
-function frontalDelta(phase: ScoringContext['frontalPhase']): {
-  delta: number
-  desc: string
-} {
+//
+// v2.1 (post-launch tuning, per audit memo update): pre-frontal +1.5 was
+// flipping otherwise-7 units to 8/fire on a single NWS "showers" keyword.
+// Reduced to +1.0 (+1.25 for trout) so pre-front is still the strongest
+// single environmental modifier but can't single-handedly cross the fire
+// threshold. Post-frontal magnitude eased to -0.75 for symmetry.
+function frontalDelta(
+  species: Species,
+  phase: ScoringContext['frontalPhase'],
+): { delta: number; desc: string } {
   switch (phase) {
-    case 'pre':
+    case 'pre': {
+      const isTrout = species === 'trout'
       return {
-        delta: 1.5,
-        desc: 'Pre-frontal window — fish feeding ahead of storm',
+        delta: isTrout ? 1.25 : 1,
+        desc: `Pre-frontal window — fish feeding ahead of storm${isTrout ? ' (trout favorite)' : ''}`,
       }
+    }
     case 'during':
       return {
         delta: 0,
@@ -347,7 +355,7 @@ function frontalDelta(phase: ScoringContext['frontalPhase']): {
       }
     case 'post':
       return {
-        delta: -1,
+        delta: -0.75,
         desc: 'Post-frontal high pressure — bite slow',
       }
     default:
@@ -637,8 +645,8 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
     add(factor(false, 0, pInfo.desc, 'pressure'))
   }
 
-  // ----- 11) Frontal phase (audit v2: new factor) ------------------------
-  const frInfo = frontalDelta(ctx.frontalPhase)
+  // ----- 11) Frontal phase (audit v2.1: species-aware) -------------------
+  const frInfo = frontalDelta(ctx.species, ctx.frontalPhase)
   if (frInfo.delta !== 0) {
     add(factor(frInfo.delta > 0, frInfo.delta, frInfo.desc, 'front'))
   } else {
@@ -651,14 +659,23 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   // ('point' / 'creek_mouth' / 'transition' / 'chokepoint' / 'confluence')
   // to clear driveby. Tags fire with delta 0 — they communicate "why this
   // score is allowed to climb", not "what's adding to it".
+  //
+  // Step 13.5 v2.1 exception: CHOKEPOINTS SELF-UNLOCK. A chokepoint (pass /
+  // inlet) IS a fishing convergence by itself per the literature — flounder
+  // stack at chokepoints, bull reds run them on tidal flows. The 2-different-
+  // types rule incorrectly gated these out (open-water passes rarely carry
+  // adjacent creek mouths or habitat transitions). Other subtypes still
+  // require the 2-different-types rule to ensure "structure meets structure".
   const tagTypes = new Set(unit.convergence.map((t) => t.type))
+  const hasChokepoint = tagTypes.has('chokepoint')
   const hasMultiConvergence = tagTypes.size >= 2
+  const isUnlocked = hasChokepoint || hasMultiConvergence
 
   for (const tag of unit.convergence) {
     add(factor(true, 0, tag.description, 'convergence'))
   }
 
-  if (!hasMultiConvergence) {
+  if (!isUnlocked) {
     if (tagTypes.size === 0) {
       add(
         factor(
@@ -689,9 +706,10 @@ export function scoreUnit(unit: ScoringUnit, ctx: ScoringContext): ScoringResult
   }
 
   // ----- Final tally ------------------------------------------------------
-  // GATING RULE: ≥ 2 DIFFERENT convergence tag types unlock above driveby.
+  // GATING RULE: either a chokepoint (self-unlocking) OR ≥ 2 DIFFERENT
+  // convergence tag types unlock above driveby.
   let score = Math.max(0, Math.min(10, total))
-  if (!hasMultiConvergence) score = Math.min(score, 4.0)
+  if (!isUnlocked) score = Math.min(score, 4.0)
   const tier = tierFor(score)
 
   return {

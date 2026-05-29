@@ -348,9 +348,9 @@ Direction of change matters more than absolute value.
 #### NEW: Frontal passage compound factor
 The strongest non-tide environmental trigger in the literature.
 
-- **Pre-frontal** (front in NWS forecast within 24 h, OR pressure drop > 0.10 inHg in past 6 h): **+1.5 all**
+- **Pre-frontal** (front in NWS forecast within 24 h, OR pressure drop > 0.10 inHg in past 6 h): **+1.0 all** *(v2.1 — reduced from initial +1.5 because the original magnitude was creating false-positive fires; pre-front remains the strongest single environmental modifier, just no longer enough to cross the fire threshold alone)*. **Trout: +1.25** *(v2.1 — was +1.5)*.
 - **During passage:** 0 (chaotic)
-- **Post-frontal 24–36 h after** (clear, stable high): **−1**
+- **Post-frontal 24–36 h after** (clear, stable high): **−0.75** *(v2.1 — eased from −1 for symmetry with the pre-front reduction)*
 - **Stabilized 48 h+ after:** 0
 
 #### NEW: Pass / chokepoint convergence detection

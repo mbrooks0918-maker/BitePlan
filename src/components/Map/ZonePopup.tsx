@@ -184,11 +184,11 @@ function ZonePopup() {
   const tier = result.tier
   const isLowTier = tier === 'driveby'
 
-  // Convergence factors get their own popup sections — unlocking (≥ 2
-  // different tag types) vs partial (single tag type). Everything else
-  // renders in the standard "why it's hot/driveby" list.
+  // Convergence factors get their own popup sections — unlocking vs partial.
+  // Step 13.5 v2.1: chokepoints self-unlock; other subtypes still require
+  // ≥ 2 different tag types. Mirrors the gate in scoring.ts.
   const tagTypes = new Set(unit.convergence.map((t) => t.type))
-  const isUnlocked = tagTypes.size >= 2
+  const isUnlocked = tagTypes.has('chokepoint') || tagTypes.size >= 2
   const convergenceFired = result.firedFactors.filter((f) => f.category === 'convergence')
   const convergenceMissing = result.missingFactors.filter((f) => f.category === 'convergence')
   const otherFiredFactors = result.firedFactors.filter((f) => f.category !== 'convergence')
