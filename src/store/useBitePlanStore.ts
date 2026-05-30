@@ -109,22 +109,35 @@ function saveOnWaterPromptDismissed(): void {
   } catch {}
 }
 
-// Step 22 follow-up: base-layer switcher.
+// Step 22 follow-up: base-layer switcher (revised).
 //
 // Three options the user can pick between in the top-right floating
 // switcher (rendered next to the LocateButton):
-//   'noaa-paper'     — NOAA Chart Display Service, paper-chart symbology
-//                      (default; what the kayak/skiff fishing crowd reads)
-//   'noaa-enc'       — same source data, modern S-52 / ECDIS symbology
-//   'esri-satellite' — Esri World Imagery, the prior single base layer
+//   'noaa-chart'     — NOAA Chart Display via WMTS, paper-chart symbology
+//                      (DEFAULT; what the kayak/skiff fishing crowd reads)
+//   'esri-streets'   — Esri World Street Map (roads + place names)
+//   'esri-satellite' — Esri World Imagery (aerial)
+//
+// Migration: an earlier commit shipped `noaa-paper` and `noaa-enc` as
+// the union values. `noaa-paper` is renamed to `noaa-chart` (the URL
+// changed too); `noaa-enc` was removed because the ENC tile endpoint
+// isn't usable from Leaflet. Both old values transparently migrate to
+// `noaa-chart` on load.
 const BASE_LAYER_STORAGE_KEY = 'settings:baseLayer'
-export type BaseLayer = 'noaa-paper' | 'noaa-enc' | 'esri-satellite'
+export type BaseLayer = 'noaa-chart' | 'esri-streets' | 'esri-satellite'
 function loadBaseLayer(): BaseLayer {
   try {
     const raw = window.localStorage.getItem(BASE_LAYER_STORAGE_KEY)
-    if (raw === 'noaa-paper' || raw === 'noaa-enc' || raw === 'esri-satellite') return raw
+    if (raw === 'noaa-chart' || raw === 'esri-streets' || raw === 'esri-satellite') return raw
+    if (raw === 'noaa-paper' || raw === 'noaa-enc') {
+      // Migrate legacy values. Persist the rewrite so subsequent reads
+      // hit the fast path and the user's preference isn't "almost
+      // remembered".
+      window.localStorage.setItem(BASE_LAYER_STORAGE_KEY, 'noaa-chart')
+      return 'noaa-chart'
+    }
   } catch {}
-  return 'noaa-paper'
+  return 'noaa-chart'
 }
 function saveBaseLayer(v: BaseLayer): void {
   try {

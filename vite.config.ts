@@ -89,14 +89,16 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
-          // B.1.2 — NOAA Chart Display Service tiles (paper-chart + ENC).
-          // Same CacheFirst strategy as Esri imagery. Both NOAA endpoints
-          // live on `gis.charttools.noaa.gov` so a single cache entry
-          // holds tiles from both styles (the URL path encodes which
-          // service produced each tile, so collisions can't happen). 500
-          // entries gives us ~16 km^2 of coverage at zoom 14 per style.
+          // B.1.2 — NOAA Chart Display Service tiles (WMTS REST). All
+          // assets on `gis.charttools.noaa.gov` are tiles or capabilities
+          // documents, so we match the entire domain. The WMTS path
+          // ('.../WMTS/tile/1.0.0/.../{z}/{y}/{x}.png') is wider than the
+          // older Esri-REST pattern ('.../MapServer/tile/{z}/{y}/{x}')
+          // we briefly tried, so a domain-wide rule keeps both shapes
+          // covered without having to track every NOAA URL change.
+          // 500 entries gives us roughly 16 km² of zoom-14 coverage.
           {
-            urlPattern: /^https:\/\/gis\.charttools\.noaa\.gov\/.*\/tile\/.*$/,
+            urlPattern: /^https:\/\/gis\.charttools\.noaa\.gov\//,
             handler: 'CacheFirst',
             options: {
               cacheName: 'biteplan-noaa-charts',

@@ -219,6 +219,12 @@ function MapView() {
           url={spec.url}
           attribution={spec.attribution}
           maxZoom={spec.maxZoom}
+          // Leaflet treats `undefined` here as NaN in its tile-URL math
+          // (a switch from a layer that DID set zoomOffset to one that
+          // didn't would leave the URL with `tile/NaN/...`). Default to
+          // 0 so optional fields are safe.
+          minZoom={spec.minZoom ?? 0}
+          zoomOffset={spec.zoomOffset ?? 0}
         />
         <HabitatLayers />
         <DepthContours />
