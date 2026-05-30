@@ -89,6 +89,24 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
+          // B.1.2 — NOAA Chart Display Service tiles (paper-chart + ENC).
+          // Same CacheFirst strategy as Esri imagery. Both NOAA endpoints
+          // live on `gis.charttools.noaa.gov` so a single cache entry
+          // holds tiles from both styles (the URL path encodes which
+          // service produced each tile, so collisions can't happen). 500
+          // entries gives us ~16 km^2 of coverage at zoom 14 per style.
+          {
+            urlPattern: /^https:\/\/gis\.charttools\.noaa\.gov\/.*\/tile\/.*$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'biteplan-noaa-charts',
+              expiration: {
+                maxEntries: 500,
+                maxAgeSeconds: 30 * 24 * 60 * 60,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           // B.3 — NOAA tide API: StaleWhileRevalidate, 1h fresh window.
           // The store's SWR layer is also in front; runtime cache gives
           // us truly-offline fallback after that has expired.

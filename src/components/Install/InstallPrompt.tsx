@@ -164,6 +164,11 @@ function IosInstallCard({
             Tap the <span className="text-slate-200 font-medium">Share</span> icon
             in Safari then <span className="text-slate-200 font-medium">‘Add to Home Screen’</span>.
           </div>
+          <div className="text-[11px] text-slate-400 mt-1.5 leading-snug">
+            Tip: pan the area you plan to fish in each map style (chart, ENC,
+            satellite) at least once on Wi-Fi — tiles cache per style so they
+            stay readable on the water.
+          </div>
         </div>
         <button
           type="button"

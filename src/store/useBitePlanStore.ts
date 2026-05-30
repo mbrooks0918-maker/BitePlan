@@ -109,6 +109,29 @@ function saveOnWaterPromptDismissed(): void {
   } catch {}
 }
 
+// Step 22 follow-up: base-layer switcher.
+//
+// Three options the user can pick between in the top-right floating
+// switcher (rendered next to the LocateButton):
+//   'noaa-paper'     — NOAA Chart Display Service, paper-chart symbology
+//                      (default; what the kayak/skiff fishing crowd reads)
+//   'noaa-enc'       — same source data, modern S-52 / ECDIS symbology
+//   'esri-satellite' — Esri World Imagery, the prior single base layer
+const BASE_LAYER_STORAGE_KEY = 'settings:baseLayer'
+export type BaseLayer = 'noaa-paper' | 'noaa-enc' | 'esri-satellite'
+function loadBaseLayer(): BaseLayer {
+  try {
+    const raw = window.localStorage.getItem(BASE_LAYER_STORAGE_KEY)
+    if (raw === 'noaa-paper' || raw === 'noaa-enc' || raw === 'esri-satellite') return raw
+  } catch {}
+  return 'noaa-paper'
+}
+function saveBaseLayer(v: BaseLayer): void {
+  try {
+    window.localStorage.setItem(BASE_LAYER_STORAGE_KEY, v)
+  } catch {}
+}
+
 // Step 13.6 — depth filter mode persistence.
 const DEPTH_FILTER_STORAGE_KEY = 'settings:depthFilter'
 export type DepthFilterMode = 'strict' | 'tide_aware' | 'tag_only'
@@ -243,6 +266,10 @@ type BitePlanState = {
   sheetSnapPoint: SheetSnapPoint
   tierFilter: TierFilter
 
+  /** Step 22 follow-up — selected map base layer. Persisted to
+   *  `settings:baseLayer`. Default = 'noaa-paper'. */
+  baseLayer: BaseLayer
+
   // Step 17 — GPS / Locate Me state.
   // userLocation is null until the first fix lands; once present, it
   // updates on every watchPosition tick. The UI doesn't pan automatically
@@ -309,6 +336,8 @@ type BitePlanState = {
   flyToScoredUnit: (entry: ScoredEntry) => void
   setSheetSnapPoint: (snap: SheetSnapPoint) => void
   setTierFilter: (filter: TierFilter) => void
+  /** Step 22 follow-up — swap the map base layer. Persists to localStorage. */
+  setBaseLayer: (layer: BaseLayer) => void
 
   /** Step 17 — geolocation actions. The lib/geolocation.ts module owns the
    *  navigator.geolocation handle and visibility wiring; these actions are
@@ -499,6 +528,7 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
   pendingFlyToLatLon: null,
   sheetSnapPoint: loadSheetSnap(),
   tierFilter: 'all',
+  baseLayer: loadBaseLayer(),
   userLocation: null,
   locationStatus: 'off',
   locationWatchActive: false,
@@ -617,6 +647,10 @@ export const useBitePlanStore = create<BitePlanState>((set, get) => ({
     set({ sheetSnapPoint: snap })
   },
   setTierFilter: (filter) => set({ tierFilter: filter }),
+  setBaseLayer: (layer) => {
+    saveBaseLayer(layer)
+    set({ baseLayer: layer })
+  },
   setLocationStatus: (status) => set({ locationStatus: status }),
   setUserLocation: (loc) => set({ userLocation: loc }),
   setLocationWatchActive: (active) => set({ locationWatchActive: active }),

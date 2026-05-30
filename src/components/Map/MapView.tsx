@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useBitePlanStore } from '@/store/useBitePlanStore'
+import { BASE_LAYER_CONFIG } from './baseLayers'
 import HabitatLayers from './HabitatLayers'
 import DepthContours from './DepthContours'
 import ScoredZones from './ScoredZones'
@@ -13,16 +14,12 @@ import SavedWaypoints from './SavedWaypoints'
 import SavedWaypointPopup from './SavedWaypointPopup'
 import UserLocation from './UserLocation'
 import LocateButton from '@/components/LocateButton'
+import BaseLayerSwitcher from './BaseLayerSwitcher'
 import SaveToast from '@/components/SaveWaypoint/SaveToast'
 import BottomSheet from '@/components/BottomSheet/BottomSheet'
 import SheetContent from '@/components/BottomSheet/SheetContent'
 import OnWaterMode from '@/components/OnWater/OnWaterMode'
 import InstallPrompt from '@/components/Install/InstallPrompt'
-
-const ESRI_TILE_URL =
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-
-const ESRI_ATTRIBUTION = 'Tiles &copy; Esri'
 
 const TIDE_DEBOUNCE_MS = 500
 const WEATHER_DEBOUNCE_MS = 500
@@ -195,6 +192,12 @@ function MapStateSync() {
 function MapView() {
   const center = useBitePlanStore((s) => s.center)
   const zoom = useBitePlanStore((s) => s.zoom)
+  // Step 22 follow-up — selected base layer drives the TileLayer below.
+  // `key={baseLayer}` forces React (and Leaflet) to fully remount the
+  // tile layer when the user swaps so we don't leak tiles from the
+  // previous source.
+  const baseLayer = useBitePlanStore((s) => s.baseLayer)
+  const spec = BASE_LAYER_CONFIG[baseLayer]
 
   return (
     <>
@@ -212,9 +215,10 @@ function MapView() {
         className="fixed inset-0 z-0"
       >
         <TileLayer
-          url={ESRI_TILE_URL}
-          attribution={ESRI_ATTRIBUTION}
-          maxZoom={19}
+          key={spec.key}
+          url={spec.url}
+          attribution={spec.attribution}
+          maxZoom={spec.maxZoom}
         />
         <HabitatLayers />
         <DepthContours />
@@ -227,6 +231,7 @@ function MapView() {
         <MapFlyToSync />
         <InvalidateSizeOnMount />
         <LocateButton />
+        <BaseLayerSwitcher />
       </MapContainer>
       <ScoringStatus />
       <BottomSheet>
